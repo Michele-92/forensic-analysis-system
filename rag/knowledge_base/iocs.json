@@ -1,0 +1,37 @@
+[
+  {
+    "value": "192.168.1.100",
+    "type": "ip",
+    "threat": "Known C2 Server",
+    "source": "MISP",
+    "confidence": "high",
+    "first_seen": "2026-01-15",
+    "tags": ["malware", "c2", "apt"]
+  },
+  {
+    "value": "malicious.example.com",
+    "type": "domain",
+    "threat": "Phishing Domain",
+    "source": "PhishTank",
+    "confidence": "medium",
+    "first_seen": "2026-02-01",
+    "tags": ["phishing", "credential_theft"]
+  },
+  {
+    "value": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "type": "sha256",
+    "threat": "Ransomware",
+    "source": "VirusTotal",
+    "confidence": "high",
+    "first_seen": "2025-12-20",
+    "tags": ["ransomware", "encryption"]
+  },
+  {
+    "value": "/tmp/.hidden",
+    "type": "file_path",
+    "threat": "Common Malware Location",
+    "source": "Internal",
+    "confidence": "medium",
+    "tags": ["persistence", "malware"]
+  }
+]

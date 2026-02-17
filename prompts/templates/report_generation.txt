@@ -1,0 +1,36 @@
+Generiere einen forensischen Report basierend auf Analyseergebnissen.
+
+Findings:
+{findings}
+
+Risk-Scores:
+{risk_scores}
+
+STRUKTUR:
+## Executive Summary
+1-Paragraph-Überblick:
+  - Was wurde analysiert?
+  - Top-3 kritische Risiken
+  - Gesamtrisiko-Einschätzung (Niedrig/Mittel/Hoch/Kritisch)
+
+## Detaillierte Timeline
+Chronologische Aufzählung mit Timestamps:
+  - Format: `YYYY-MM-DD HH:MM - Event + Risiko-Level`
+
+## Empfehlungen
+3-5 konkrete Schritte zur Behebung/Mitigation:
+  - Priorisiert nach Dringlichkeit
+  - Technisch umsetzbar (z.B. "Blockiere IP X.X.X.X via iptables")
+
+## Belege
+Referenzen zu spezifischen Events/Hashes:
+  - Event-IDs, Dateinamen, IP-Adressen
+
+ANFORDERUNGEN:
+- Max. 1000 Wörter
+- Markdown/HTML-kompatibel
+- Präzise, keine Spekulation ohne Evidenz
+- Verwende Forensik-Terminologie (IOC, TTPs, IOA)
+
+AUSGABE:
+[Report im Markdown-Format]

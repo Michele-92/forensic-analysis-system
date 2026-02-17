@@ -1,0 +1,30 @@
+[
+  {
+    "name": "Suspicious Cron Job",
+    "pattern": "crontab.*\\/tmp",
+    "severity": "high",
+    "description": "Cron job executing binary from /tmp directory",
+    "recommendation": "Review cron job, analyze binary, check for persistence"
+  },
+  {
+    "name": "Root SSH Login",
+    "pattern": "sshd.*root.*from",
+    "severity": "medium",
+    "description": "Direct root login via SSH",
+    "recommendation": "Disable root SSH login, use sudo instead"
+  },
+  {
+    "name": "Base64 Encoded Command",
+    "pattern": "base64.*-d",
+    "severity": "high",
+    "description": "Base64 decoding often used to obfuscate commands",
+    "recommendation": "Decode and analyze command, check parent process"
+  },
+  {
+    "name": "Wget to Unknown IP",
+    "pattern": "wget.*http://[0-9]",
+    "severity": "high",
+    "description": "Downloading file from IP address (not domain)",
+    "recommendation": "Analyze downloaded file, block IP if malicious"
+  }
+]

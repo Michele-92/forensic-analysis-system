@@ -1,0 +1,38 @@
+[
+  {
+    "id": "T1053.003",
+    "name": "Scheduled Task/Job: Cron",
+    "tactic": "Persistence, Execution",
+    "description": "Adversaries may abuse task scheduling functionality to facilitate initial or recurring execution of malicious code.",
+    "detection": "Monitor crontab modifications, unusual scheduled tasks",
+    "platforms": ["Linux", "macOS"],
+    "keywords": ["cron", "crontab", "scheduled", "/etc/cron"]
+  },
+  {
+    "id": "T1021.004",
+    "name": "Remote Services: SSH",
+    "tactic": "Lateral Movement",
+    "description": "Adversaries may use Valid Accounts to log into remote machines using Secure Shell (SSH).",
+    "detection": "Monitor SSH logs for unusual login patterns, unknown IPs",
+    "platforms": ["Linux", "macOS"],
+    "keywords": ["ssh", "sshd", "authorized_keys", ".ssh"]
+  },
+  {
+    "id": "T1070.004",
+    "name": "Indicator Removal: File Deletion",
+    "tactic": "Defense Evasion",
+    "description": "Adversaries may delete files left behind by the actions of their intrusion activity.",
+    "detection": "Monitor file deletion events, especially in temp directories",
+    "platforms": ["Windows", "Linux", "macOS"],
+    "keywords": ["rm", "del", "unlink", "shred"]
+  },
+  {
+    "id": "T1059.004",
+    "name": "Command and Scripting Interpreter: Unix Shell",
+    "tactic": "Execution",
+    "description": "Adversaries may abuse Unix shell commands and scripts for execution.",
+    "detection": "Monitor shell command execution, especially from unusual parents",
+    "platforms": ["Linux", "macOS"],
+    "keywords": ["bash", "sh", "/bin/sh", "shell"]
+  }
+]

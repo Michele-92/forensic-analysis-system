@@ -1,0 +1,32 @@
+Du bist ein forensischer Analyst. Analysiere diese Timeline-Events (JSON-Format).
+
+Timeline-Events:
+{timeline}
+
+AUFGABE:
+Schritt 1: Identifiziere Anomalien basierend auf:
+  - Ungewöhnliche Zeitpunkte (z.B. nachts, Wochenende)
+  - Verdächtige Prozesse/Befehle (z.B. base64, wget zu unbekannten IPs)
+  - Auffällige User-Aktivitäten (z.B. Root-Login von unbekannter IP)
+  - Ungewöhnliche Dateizugriffe (z.B. /etc/shadow, /root/.ssh)
+
+Schritt 2: Bewerte Risiko (0.0-1.0):
+  - 0.0-0.3: Normal/Harmlos
+  - 0.3-0.7: Verdächtig (weitere Prüfung nötig)
+  - 0.7-1.0: Hochriskant (wahrscheinlicher Angriff)
+
+Schritt 3: Erkläre WARUM (kurz, faktenbasiert, max. 50 Wörter pro Event).
+
+AUSGABE (nur JSON, keine Markdown-Blöcke):
+[
+  {{
+    "event_id": "Event-Identifier aus Input",
+    "event": "Kurzbeschreibung des Events",
+    "timestamp": "ISO-Timestamp",
+    "anomaly_score": 0.85,
+    "risk_level": "high",
+    "explanation": "Root-Login von unbekannter IP außerhalb Geschäftszeiten. Kein VPN-Zugriff."
+  }}
+]
+
+Gib NUR Events zurück mit anomaly_score >= 0.5.

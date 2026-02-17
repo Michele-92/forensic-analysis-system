@@ -1,0 +1,33 @@
+[
+  {
+    "event_id": "evt_001",
+    "event": "Root SSH login from 192.168.1.100",
+    "timestamp": "2026-02-15T03:15:00",
+    "anomaly_score": 0.85,
+    "risk_level": "high",
+    "explanation": "Root login from unknown IP at 03:15 AM, outside business hours. No VPN connection detected.",
+    "confidence": "high",
+    "indicators": ["unusual_time", "unknown_ip", "root_access", "no_vpn"],
+    "recommended_actions": [
+      "Immediately disable root SSH access",
+      "Block IP 192.168.1.100 at firewall",
+      "Review all SSH logs for this IP",
+      "Check for lateral movement"
+    ]
+  },
+  {
+    "event_id": "evt_042",
+    "event": "Cron job modified: /tmp/.hidden",
+    "timestamp": "2026-02-15T03:20:00",
+    "anomaly_score": 0.92,
+    "risk_level": "critical",
+    "explanation": "Cron job configured to execute hidden binary in /tmp directory. Classic persistence mechanism.",
+    "confidence": "high",
+    "indicators": ["persistence", "tmp_directory", "hidden_file", "cron_modification"],
+    "recommended_actions": [
+      "Remove malicious cron job",
+      "Analyze /tmp/.hidden binary",
+      "Check for additional persistence mechanisms"
+    ]
+  }
+]

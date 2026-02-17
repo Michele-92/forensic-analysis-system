@@ -1,0 +1,30 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# System-Dependencies
+RUN apt-get update && apt-get install -y \
+    libmagic1 \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python-Dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy Application
+COPY backend/ ./backend/
+COPY prompts/ ./prompts/
+COPY rag/ ./rag/
+COPY tools/ ./tools/
+
+# Create Directories
+RUN mkdir -p data/uploads data/outputs logs
+
+# Environment
+ENV PYTHONUNBUFFERED=1
+ENV LOG_LEVEL=INFO
+
+EXPOSE 8000
+
+CMD ["uvicorn", "backend.api:app", "--host", "0.0.0.0", "--port", "8000"]

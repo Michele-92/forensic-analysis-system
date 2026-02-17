@@ -1,0 +1,34 @@
+Als DFIR-Experte, interpretiere diese forensische Timeline.
+
+Timeline-Events:
+{timeline}
+
+Bekannte IOCs/Kontext:
+{iocs}
+
+AUFGABE:
+Schritt 1: Erstelle eine chronologische Zusammenfassung (3-5 Schlüsselschritte).
+  Format: "HH:MM - Was passierte + Relevanz"
+
+Schritt 2: Generiere 2-3 Hypothesen zu möglichen Vorfällen.
+  Format: "Hypothese: [Titel] - Evidenz: [Welche Events stützen das?]"
+  Beispiele: Persistence via Cron, Lateral Movement via SSH, Data Exfiltration
+
+Schritt 3: Priorisiere Top-5 Findings nach Kritikalität.
+  Format: Kategorie (z.B. Malware, Persistence) + Event + Risiko
+
+AUSGABE als Markdown:
+## Zusammenfassung
+- 10:00 - Initiale Kompromittierung via SSH (IP: X.X.X.X)
+- 10:15 - Privilege Escalation zu Root
+- ...
+
+## Hypothesen
+### Hypothese 1: Persistence via Cron-Job
+**Evidenz:** Event-IDs 42, 58 zeigen crontab-Modifikationen + unbekannte Binary.
+**Confidence:** Hoch (85%)
+
+## Top-Findings
+1. **[CRITICAL]** Malware: Unbekanntes Binary /tmp/.hidden
+2. **[HIGH]** Persistence: Cron-Job für /tmp/.hidden
+...

@@ -1,0 +1,24 @@
+# Environment
+.env
+!.env.example
+
+# Docker
+docker-compose.override.yml
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+*.egg-info/
+
+# Data
+data/uploads/*
+data/outputs/*
+!data/uploads/.gitkeep
+!data/outputs/.gitkeep
+
+# Logs
+logs/*.log
+
+# OS
+.DS_Store
