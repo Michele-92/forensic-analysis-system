@@ -55,8 +55,11 @@ TSK_RECURSIVE = os.getenv("TSK_RECURSIVE", "true").lower() == "true"
 
 # LLM-Konfiguration
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-DEFAULT_LLM_MODEL = os.getenv("DEFAULT_LLM_MODEL", "llama3.1")
-LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", 120))  # 2 Minuten
+DEFAULT_LLM_MODEL = os.getenv("DEFAULT_LLM_MODEL", "llama3.1:8b")
+LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", 600))  # 10 Minuten (CPU-Inferenz ist langsam)
+
+# Threat Intelligence
+ABUSEIPDB_API_KEY = os.getenv("ABUSEIPDB_API_KEY", "")
 
 LLM_TEMPERATURE = {
     "anomaly_detection": float(os.getenv("LLM_TEMP_ANOMALY", 0.3)),

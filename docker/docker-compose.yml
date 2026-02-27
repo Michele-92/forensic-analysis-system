@@ -1,6 +1,5 @@
-version: '3.8'
-
 services:
+  # ── Backend (FastAPI + Analyse-Pipeline) ─────────────────────
   backend:
     build:
       context: ..
@@ -10,32 +9,31 @@ services:
       - "8000:8000"
     volumes:
       - ../data:/app/data
-      - ../tools:/app/tools
       - ../logs:/app/logs
     environment:
-      - LOG_LEVEL=INFO
       - OLLAMA_BASE_URL=http://ollama:11434
-      - API_HOST=0.0.0.0
-      - API_PORT=8000
+      - LOG_LEVEL=INFO
     depends_on:
       - ollama
     networks:
       - forensic-net
     restart: unless-stopped
 
+  # ── Frontend (React + nginx Reverse-Proxy) ───────────────────
   frontend:
     build:
-      context: ../frontend
-      dockerfile: ../docker/Dockerfile.frontend
+      context: ..
+      dockerfile: docker/Dockerfile.frontend
     container_name: forensic-frontend
     ports:
-      - "5173:5173"
+      - "3000:80"
     depends_on:
       - backend
     networks:
       - forensic-net
     restart: unless-stopped
 
+  # ── Ollama (Lokale LLM-Inferenz) ─────────────────────────────
   ollama:
     image: ollama/ollama:latest
     container_name: forensic-ollama
@@ -46,22 +44,17 @@ services:
     networks:
       - forensic-net
     restart: unless-stopped
-
-  redis:
-    image: redis:7-alpine
-    container_name: forensic-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis-data:/data
-    networks:
-      - forensic-net
-    restart: unless-stopped
-    command: redis-server --appendonly yes
+    # GPU-Support: Auskommentieren falls NVIDIA GPU vorhanden
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
 
 volumes:
   ollama-data:
-  redis-data:
 
 networks:
   forensic-net:

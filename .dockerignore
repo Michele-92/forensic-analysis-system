@@ -1,0 +1,48 @@
+# Version Control
+.git
+.gitignore
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Node
+node_modules/
+frontend/node_modules/
+
+# Build artifacts
+dist/
+frontend/dist/
+*.egg
+
+# Data (wird per Volume gemountet)
+data/uploads/
+data/outputs/
+data/samples/
+data/llm_cache/
+logs/*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker (Dockerfiles nicht kopieren, aber nginx.conf wird gebraucht)
+docker/Dockerfile.*
+docker/docker-compose.yml
+
+# Sonstiges
+notebooks/
+docs/
+tests/
+scripts/
+*.md
+!README.md
+.env
+.env.example

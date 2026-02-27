@@ -6,58 +6,51 @@ Dieses Modul enthält alle Komponenten für die LLM-basierte Analyse:
 - PromptManager: Verwaltung von Prompt-Templates
 - OllamaClient: API-Wrapper für Ollama
 - RAGHandler: Retrieval-Augmented Generation
-- Evaluator: Performance-Metriken und Evaluation
 """
 
 from .agent import ForensicLLMAgent
 from .prompts import PromptManager
 from .ollama_client import OllamaClient
 from .rag_handler import RAGHandler
-from .evaluator import LLMEvaluator, EvaluationMetrics
+from .multi_agent import MultiAgentOrchestrator
+from .case_correlator import CaseCorrelationAgent
 
 __version__ = "1.0.0"
 
 __all__ = [
     # Main Agent
     "ForensicLLMAgent",
-    
+    "MultiAgentOrchestrator",
+    "CaseCorrelationAgent",
+
     # Components
     "PromptManager",
     "OllamaClient",
     "RAGHandler",
-    
-    # Evaluation
-    "LLMEvaluator",
-    "EvaluationMetrics",
 ]
 
 
 # Convenience function for quick agent creation
-def create_agent(model: str = "llama3.1", 
+def create_agent(model: str = None,
                  use_rag: bool = True,
                  **kwargs) -> ForensicLLMAgent:
     """
     Factory-Funktion zum schnellen Erstellen eines Agents.
-    
+
     Args:
-        model: LLM-Model-Name (default: llama3.1)
+        model: LLM-Model-Name (default: aus config.py)
         use_rag: RAG aktivieren (default: True)
         **kwargs: Weitere Parameter für ForensicLLMAgent
-    
+
     Returns:
         Konfigurierter ForensicLLMAgent
-    
-    Example:
-        >>> from backend.llm_agent import create_agent
-        >>> agent = create_agent(model="llama3.1")
-        >>> anomalies = agent.detect_anomalies(timeline)
     """
     return ForensicLLMAgent(model=model, use_rag=use_rag, **kwargs)
 
 
 # Module-level configuration (optional)
 DEFAULT_CONFIG = {
-    "model": "llama3.1",
+    "model": "llama3.1:8b",
     "temperature": {
         "anomaly_detection": 0.3,  # Niedrig für faktische Analyse
         "timeline_interpretation": 0.5,  # Mittel für Hypothesen

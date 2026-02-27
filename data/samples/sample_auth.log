@@ -1,0 +1,55 @@
+Jan 15 06:00:01 dbserver02 CRON[5001]: pam_unix(cron:session): session opened for user root by (uid=0)
+Jan 15 06:00:01 dbserver02 CRON[5001]: pam_unix(cron:session): session closed for user root
+Jan 15 06:25:11 dbserver02 sshd[5100]: Connection from 10.0.1.50 port 38400 on 10.0.2.20 port 22 rdomain ""
+Jan 15 06:25:12 dbserver02 sshd[5100]: Accepted publickey for admin from 10.0.1.50 port 38400 ssh2
+Jan 15 06:25:12 dbserver02 sshd[5100]: pam_unix(sshd:session): session opened for user admin by (uid=0)
+Jan 15 06:25:12 dbserver02 systemd-logind[800]: New session 5 of user admin.
+Jan 15 07:00:01 dbserver02 CRON[5200]: pam_unix(cron:session): session opened for user root by (uid=0)
+Jan 15 07:00:01 dbserver02 CRON[5200]: pam_unix(cron:session): session closed for user root
+Jan 15 08:30:00 dbserver02 sshd[5300]: Invalid user admin from 45.155.205.233 port 49200 ssh2
+Jan 15 08:30:01 dbserver02 sshd[5300]: pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=45.155.205.233 user=admin
+Jan 15 08:30:01 dbserver02 sshd[5300]: Failed password for invalid user admin from 45.155.205.233 port 49200 ssh2
+Jan 15 08:30:03 dbserver02 sshd[5301]: Invalid user admin from 45.155.205.233 port 49201 ssh2
+Jan 15 08:30:03 dbserver02 sshd[5301]: Failed password for invalid user admin from 45.155.205.233 port 49201 ssh2
+Jan 15 08:30:05 dbserver02 sshd[5302]: Invalid user root from 45.155.205.233 port 49202 ssh2
+Jan 15 08:30:05 dbserver02 sshd[5302]: Failed password for root from 45.155.205.233 port 49202 ssh2
+Jan 15 08:30:07 dbserver02 sshd[5303]: Invalid user ubuntu from 45.155.205.233 port 49203 ssh2
+Jan 15 08:30:07 dbserver02 sshd[5303]: Failed password for invalid user ubuntu from 45.155.205.233 port 49203 ssh2
+Jan 15 08:30:09 dbserver02 sshd[5304]: Invalid user pi from 45.155.205.233 port 49204 ssh2
+Jan 15 08:30:09 dbserver02 sshd[5304]: Failed password for invalid user pi from 45.155.205.233 port 49204 ssh2
+Jan 15 08:30:11 dbserver02 sshd[5305]: Invalid user deploy from 45.155.205.233 port 49205 ssh2
+Jan 15 08:30:11 dbserver02 sshd[5305]: Failed password for invalid user deploy from 45.155.205.233 port 49205 ssh2
+Jan 15 08:30:13 dbserver02 sshd[5306]: Invalid user jenkins from 45.155.205.233 port 49206 ssh2
+Jan 15 08:30:13 dbserver02 sshd[5306]: Failed password for invalid user jenkins from 45.155.205.233 port 49206 ssh2
+Jan 15 08:30:15 dbserver02 sshd[5307]: Invalid user mysql from 45.155.205.233 port 49207 ssh2
+Jan 15 08:30:15 dbserver02 sshd[5307]: Failed password for invalid user mysql from 45.155.205.233 port 49207 ssh2
+Jan 15 08:30:17 dbserver02 sshd[5308]: Invalid user postgres from 45.155.205.233 port 49208 ssh2
+Jan 15 08:30:17 dbserver02 sshd[5308]: Failed password for invalid user postgres from 45.155.205.233 port 49208 ssh2
+Jan 15 08:30:30 dbserver02 sshd[5310]: error: maximum authentication attempts exceeded for root from 45.155.205.233 port 49210 ssh2 [preauth]
+Jan 15 08:30:30 dbserver02 sshd[5310]: Disconnecting authenticating user root 45.155.205.233 port 49210: Too many authentication failures [preauth]
+Jan 15 08:31:00 dbserver02 sshd[5311]: pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=45.155.205.233
+Jan 15 08:31:00 dbserver02 sshd[5311]: Failed password for root from 45.155.205.233 port 49300 ssh2
+Jan 15 08:31:02 dbserver02 sshd[5311]: Failed password for root from 45.155.205.233 port 49300 ssh2
+Jan 15 08:31:04 dbserver02 sshd[5311]: Failed password for root from 45.155.205.233 port 49300 ssh2
+Jan 15 08:31:06 dbserver02 sshd[5311]: Received disconnect from 45.155.205.233 port 49300:11: Bye Bye [preauth]
+Jan 15 08:35:00 dbserver02 sshd[5400]: Accepted password for root from 45.155.205.233 port 49500 ssh2
+Jan 15 08:35:00 dbserver02 sshd[5400]: pam_unix(sshd:session): session opened for user root by (uid=0)
+Jan 15 08:35:01 dbserver02 systemd-logind[800]: New session 8 of user root.
+Jan 15 08:36:00 dbserver02 sudo:     root : TTY=pts/1 ; PWD=/root ; USER=root ; COMMAND=/usr/bin/mysql -u root -p
+Jan 15 08:37:00 dbserver02 sudo:     root : TTY=pts/1 ; PWD=/root ; USER=root ; COMMAND=/usr/bin/mysqldump --all-databases
+Jan 15 08:40:00 dbserver02 sudo:     root : TTY=pts/1 ; PWD=/root ; USER=root ; COMMAND=/usr/bin/useradd -m -s /bin/bash backdoor
+Jan 15 08:40:01 dbserver02 useradd[5500]: new user: name=backdoor, UID=1001, GID=1001, home=/home/backdoor, shell=/bin/bash
+Jan 15 08:40:10 dbserver02 sudo:     root : TTY=pts/1 ; PWD=/root ; USER=root ; COMMAND=/usr/sbin/usermod -aG sudo backdoor
+Jan 15 08:40:11 dbserver02 usermod[5501]: add 'backdoor' to group 'sudo'
+Jan 15 08:41:00 dbserver02 sudo:     root : TTY=pts/1 ; PWD=/root ; USER=root ; COMMAND=/bin/bash -c echo 'backdoor ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+Jan 15 08:45:00 dbserver02 sshd[5600]: Accepted password for backdoor from 45.155.205.233 port 49600 ssh2
+Jan 15 08:45:00 dbserver02 sshd[5600]: pam_unix(sshd:session): session opened for user backdoor by (uid=0)
+Jan 15 08:45:01 dbserver02 systemd-logind[800]: New session 9 of user backdoor.
+Jan 15 08:50:00 dbserver02 sudo:  backdoor : TTY=pts/2 ; PWD=/home/backdoor ; USER=root ; COMMAND=/bin/bash
+Jan 15 08:55:00 dbserver02 sshd[5400]: pam_unix(sshd:session): session closed for user root
+Jan 15 09:00:01 dbserver02 CRON[5700]: pam_unix(cron:session): session opened for user root by (uid=0)
+Jan 15 09:00:01 dbserver02 CRON[5700]: pam_unix(cron:session): session closed for user root
+Jan 15 09:10:00 dbserver02 sshd[5800]: Accepted password for backdoor from 185.220.101.34 port 50100 ssh2
+Jan 15 09:10:00 dbserver02 sshd[5800]: pam_unix(sshd:session): session opened for user backdoor by (uid=0)
+Jan 15 09:15:00 dbserver02 sudo:  backdoor : TTY=pts/3 ; PWD=/home/backdoor ; USER=root ; COMMAND=/usr/bin/apt install nmap netcat
+Jan 15 09:20:00 dbserver02 sudo:  backdoor : TTY=pts/3 ; PWD=/home/backdoor ; USER=root ; COMMAND=/usr/bin/nmap -sS 10.0.0.0/16

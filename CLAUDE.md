@@ -43,6 +43,13 @@ flake8 backend/
 mypy backend/
 ```
 
+### Frontend
+```bash
+cd frontend && npm install && npm run dev   # Dev server on port 5173
+
+cd frontend && npm run build                # Production build to dist/
+```
+
 ### Docker
 ```bash
 docker compose -f docker/docker-compose.yml up
@@ -105,6 +112,22 @@ Input File → detect_input_type()
 
 `report.md`, `timeline.csv`, `anomalies_detected.json`, `preprocessed_for_llm.json`, `normalized_output.json`, `interpretation.json`, `analysis_summary.json`
 
+### Frontend (`frontend/`)
+
+React SPA with ultra-dark glassmorphism design ("Apple-Style Forensics"). Three views:
+- **Overview** - Executive summary: risk stats, key findings cards, IOC list, full report modal (rendered via `marked` + `DOMPurify`)
+- **Analytics** - Temporal Anomaly Engine (Recharts ComposedChart: Area + Scatter), artifact taxonomy pie chart, paginated event table
+- **Intelligence** - Hypothesis tree (recursive with probability bars + MITRE ATT&CK tags), scored anomaly list with expandable details
+
+Key files:
+- `App.jsx` - Root layout: Sidebar (280px) + Header tabs + main content area
+- `context/AppContext.jsx` - Global state with localStorage persistence (`useLocalStorage` hook)
+- `hooks/useJobs.js` - Upload → poll (2s interval) → load results lifecycle
+- `api/backend.js` - Backend API client (proxy via Vite `/api` → `localhost:8000`)
+- `api/gemini.js` - Optional Gemini 2.0 Flash integration for enhanced reports (`VITE_GEMINI_API_KEY` in `.env`)
+
+Styling: Tailwind CSS with custom `.glass` / `.glass-card` utilities, LED risk indicators, Inter + JetBrains Mono fonts.
+
 ## Key Design Decisions
 
 - **Pipeline uses relative imports from `backend/` root** - modules are imported as `from modules.normalizer import DataNormalizer` (not `backend.modules...`), but the API imports as `from pipeline import run_pipeline`. Be aware of the working directory assumption.
@@ -115,6 +138,5 @@ Input File → detect_input_type()
 
 ## Code Style
 
-- Python 3.11+, Black formatter (line-length 100), isort (black profile)
-- German comments and log messages throughout the codebase
-- Logging uses emoji indicators: `✓` success, `✗` error, `⚠` warning, `⊘` skipped
+- **Backend:** Python 3.11+, Black formatter (line-length 100), isort (black profile). German comments and log messages. Logging uses emoji indicators: `✓` success, `✗` error, `⚠` warning, `⊘` skipped
+- **Frontend:** React 18 functional components + hooks, Tailwind CSS utility-first, Recharts for charts. German UI labels.

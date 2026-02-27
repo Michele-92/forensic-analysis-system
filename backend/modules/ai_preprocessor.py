@@ -66,15 +66,38 @@ class AIPreprocessor:
     
     @staticmethod
     def _is_suspicious(event: Dict) -> bool:
-        """Heuristik für verdächtige Events."""
-        desc = event.get('description', '').lower()
-        
+        """Heuristik fuer verdaechtige Events. Nutzt event_type UND description."""
+        # Hoch-verdaechtige Event-Typen (vom LogParser gesetzt)
+        suspicious_types = {
+            'auth_failure', 'credential_access', 'data_exfiltration',
+            'anti_forensics', 'network_attack', 'privilege_escalation',
+            'suspicious_request', 'network_tool', 'account_modification',
+            'sqli_attempt', 'xss_attempt', 'http_error', 'file_download',
+            'permission_change', 'firewall_block', 'firewall_drop',
+            'firewall_deny', 'system_alert',
+        }
+
+        event_type = event.get('event_type', '')
+        if event_type in suspicious_types:
+            return True
+
+        # Anomalie-Score (falls bereits gesetzt)
+        if event.get('is_anomaly', False):
+            return True
+        if event.get('anomaly_score', 0) > 0.5:
+            return True
+
+        # Keyword-Check in description und metadata.message
+        meta = event.get('metadata', {}) if isinstance(event.get('metadata'), dict) else {}
+        desc = (event.get('description', '') + ' ' + meta.get('message', '')).lower()
+
         suspicious_keywords = [
-            'root', 'admin', 'sudo', 'ssh', 'tmp',
-            'cron', 'scheduled', 'powershell', 'cmd.exe',
-            'base64', 'wget', 'curl', 'nc', 'netcat'
+            'root', 'admin', 'sudo', 'ssh', 'tmp', 'failed', 'invalid',
+            'cron', 'scheduled', 'powershell', 'cmd.exe', 'chmod',
+            'base64', 'wget', 'curl', 'nc', 'netcat', 'nmap',
+            'shadow', 'passwd', 'exfil', 'reverse', 'backdoor',
         ]
-        
+
         return any(kw in desc for kw in suspicious_keywords)
     
     @staticmethod
@@ -122,60 +145,79 @@ class AIPreprocessor:
     @staticmethod
     def extract_key_indicators(timeline: List[Dict]) -> Dict[str, List[str]]:
         """
-        REPARATUR #62: Extrahiert Key-Indicators aus Timeline mit Logging.
-        
-        Args:
-            timeline: Timeline-Events
-        
-        Returns:
-            Dict mit kategorisierten Indicators (IPs, Domains, Users, etc.)
+        Extrahiert Key-Indicators (IOCs) aus Timeline-Events.
+        Unterstuetzt sowohl Filesystem- als auch Log-parsed Events.
         """
         import re
-        
-        logger.info(f"→ Extrahiere Key-Indicators aus {len(timeline)} Events")
-        
+
+        logger.info(f"Extrahiere Key-Indicators aus {len(timeline)} Events")
+
         indicators = {
             'ips': set(),
             'domains': set(),
             'users': set(),
             'processes': set(),
-            'files': set()
+            'files': set(),
+            'hostnames': set(),
         }
-        
+
         ip_pattern = r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b'
-        domain_pattern = r'\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b'
-        
+        domain_pattern = r'\b(?:[a-zA-Z0-9-]+\.)+(?:com|net|org|io|de|ru|cn|info|biz|xyz)\b'
+
         try:
             for event in timeline:
                 desc = event.get('description', '')
-                
-                # IPs
-                indicators['ips'].update(re.findall(ip_pattern, desc))
-                
+                meta = event.get('metadata', {}) if isinstance(event.get('metadata'), dict) else {}
+
+                # Kombinierter Text fuer Regex-Suche
+                search_text = desc + ' ' + meta.get('message', '') + ' ' + meta.get('raw_line', '')
+
+                # IPs — aus Text und expliziten Feldern
+                indicators['ips'].update(re.findall(ip_pattern, search_text))
+                if meta.get('src_ip'):
+                    indicators['ips'].add(meta['src_ip'])
+
                 # Domains
-                indicators['domains'].update(re.findall(domain_pattern, desc))
-                
-                # Users (vereinfacht)
-                if 'user:' in desc.lower():
-                    user = desc.lower().split('user:')[1].split()[0]
-                    indicators['users'].add(user)
-                
-                # Files
-                if 'path' in event.get('metadata', {}):
-                    indicators['files'].add(event['metadata']['path'])
-            
+                indicators['domains'].update(re.findall(domain_pattern, search_text))
+
+                # Users — aus Metadata-Feldern und Text
+                if meta.get('user') and meta['user'] not in ('-', 'None', ''):
+                    indicators['users'].add(str(meta['user']))
+                # "user:" Pattern in Text
+                for pattern in [r'user[=: ]+(\w+)', r'for (\w+) from']:
+                    for match in re.findall(pattern, search_text, re.IGNORECASE):
+                        if match and len(match) > 1:
+                            indicators['users'].add(match)
+
+                # Processes
+                if meta.get('process') and meta['process'] not in ('', 'None'):
+                    indicators['processes'].add(str(meta['process']))
+
+                # Hostnames
+                if meta.get('hostname') and meta['hostname'] not in ('', 'None'):
+                    indicators['hostnames'].add(str(meta['hostname']))
+
+                # Files/Paths
+                if meta.get('path') and meta['path'] not in ('/', ''):
+                    indicators['files'].add(str(meta['path']))
+                if meta.get('name'):
+                    indicators['files'].add(str(meta['name']))
+
+            # Localhost / triviale Eintraege filtern
+            indicators['ips'].discard('127.0.0.1')
+            indicators['ips'].discard('0.0.0.0')
+
             # Konvertiere sets zu lists
-            result = {k: list(v) for k, v in indicators.items()}
-            
-            logger.info(f"✓ Key-Indicators extrahiert:")
-            logger.info(f"  → IPs: {len(result['ips'])}")
-            logger.info(f"  → Domains: {len(result['domains'])}")
-            logger.info(f"  → Users: {len(result['users'])}")
-            logger.info(f"  → Files: {len(result['files'])}")
-            
+            result = {k: sorted(list(v)) for k, v in indicators.items()}
+
+            logger.info(f"Key-Indicators extrahiert:")
+            for key, vals in result.items():
+                if vals:
+                    logger.info(f"  {key}: {len(vals)} ({', '.join(vals[:5])}{'...' if len(vals) > 5 else ''})")
+
             return result
         except Exception as e:
-            logger.error(f"✗ Fehler beim Indicators-Extraction: {e}")
+            logger.error(f"Fehler beim Indicators-Extraction: {e}")
             return {k: [] for k in indicators.keys()}
     
     @staticmethod

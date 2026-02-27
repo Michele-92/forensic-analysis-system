@@ -8,23 +8,31 @@ RUN apt-get update && apt-get install -y \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Python-Dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Dependencies aus pyproject.toml installieren (Layer-Caching)
+COPY pyproject.toml ./
+RUN python3 -c "\
+import tomllib;\
+f=open('pyproject.toml','rb');\
+d=tomllib.load(f);\
+deps=d['project']['dependencies'];\
+f.close();\
+open('requirements.txt','w').write('\n'.join(deps))\
+" && pip install --no-cache-dir -r requirements.txt && rm requirements.txt
 
-# Copy Application
+# Applikation kopieren
 COPY backend/ ./backend/
 COPY prompts/ ./prompts/
 COPY rag/ ./rag/
-COPY tools/ ./tools/
 
-# Create Directories
-RUN mkdir -p data/uploads data/outputs logs
+# Verzeichnisse erstellen
+RUN mkdir -p data/uploads data/outputs data/samples data/llm_cache logs
 
-# Environment
+# Umgebungsvariablen
 ENV PYTHONUNBUFFERED=1
-ENV LOG_LEVEL=INFO
+ENV PYTHONPATH=/app
 
 EXPOSE 8000
 
-CMD ["uvicorn", "backend.api:app", "--host", "0.0.0.0", "--port", "8000"]
+# Aus backend/ starten damit relative Imports (from pipeline import ...) funktionieren
+WORKDIR /app/backend
+CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]

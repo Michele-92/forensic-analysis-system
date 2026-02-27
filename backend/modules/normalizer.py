@@ -72,8 +72,11 @@ class DataNormalizer:
     
     @staticmethod
     def _infer_event_type(event: Dict) -> str:
-        """Leitet Event-Typ ab."""
-        if 'event_id' in event:
+        """Leitet Event-Typ ab. Bevorzugt existierenden event_type (z.B. vom LogParser)."""
+        # LogParser setzt bereits spezifische event_types (auth_failure, ssh_event, etc.)
+        if 'event_type' in event and event['event_type'] not in ('unknown', 'log_entry', ''):
+            return event['event_type']
+        elif 'event_id' in event:
             return 'windows_event'
         elif 'inode' in event:
             return 'file_system'
