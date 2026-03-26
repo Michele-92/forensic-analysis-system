@@ -11,10 +11,6 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["backend*"]
-
 dependencies = [
     "click>=8.1.0",
     "pandas>=2.0.0",
@@ -37,6 +33,10 @@ dev = [
     "black>=23.7.0",
     "flake8>=6.1.0",
 ]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["backend*"]
 
 [tool.black]
 line-length = 100
