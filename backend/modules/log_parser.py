@@ -1,23 +1,46 @@
 """
-Log-Parser für Text-basierte und Binär-Log-Dateien.
+================================================================================
+LOG PARSER — Text- und Binär-Log-Analyse für forensische Untersuchungen
+================================================================================
+Erkennt, parst und normalisiert Log-Dateien aus unterschiedlichsten Quellen
+zu einer einheitlichen Event-Liste für die nachgelagerte Analyse-Pipeline.
+Der Parser arbeitet dateibasiert (Pfad) und gibt immer eine Liste von dicts
+zurück — auch bei unbekannten oder fehlerhaften Formaten (Fallback: Generic).
 
 Unterstützte Formate (Linux-Fokus, air-gapped):
-────────────────────────────────────────────────
-1.  Syslog / Auth.log      — klassisches RFC 3164 Format
-2.  Apache / Nginx         — Combined Log Format
-3.  Firewall (iptables)    — Kernel-Logging + einfaches ALLOW/BLOCK
-4.  Linux Audit Log        — type=SYSCALL / type=EXECVE / type=USER_*
-5.  Systemd Journal        — JSON-Export via journalctl --output=json
-6.  APT / dpkg Log         — Debian/Ubuntu Paketverwaltung
-7.  YUM / DNF Log          — RHEL/CentOS/Fedora Paketverwaltung
-8.  wtmp / btmp / utmpdb   — Binäres Login-Journal (struct-basiert)
-9.  MySQL Error Log        — 8.x und 5.7 Format
-10. MySQL General Log      — Query-Log
-11. OpenVPN Log            — Verbindungs- und Trennungs-Events
-12. sysmon for Linux       — XML-Events in Syslog (Sysinternals)
-13. ISO-Timestamp          — Windows Event Log Text-Export (Fallback)
-14. Pipe-delimited         — Timeline-Format (Fallback)
-15. Generic                — Unbekannte Formate (letzter Fallback)
+    1.  Syslog / Auth.log      — klassisches RFC 3164 Format
+    2.  Apache / Nginx         — Combined Log Format
+    3.  Firewall (iptables)    — Kernel-Logging + einfaches ALLOW/BLOCK
+    4.  Linux Audit Log        — type=SYSCALL / type=EXECVE / type=USER_*
+    5.  Systemd Journal        — JSON-Export via journalctl --output=json
+    6.  APT / dpkg Log         — Debian/Ubuntu Paketverwaltung
+    7.  YUM / DNF Log          — RHEL/CentOS/Fedora Paketverwaltung
+    8.  wtmp / btmp / utmpdb   — Binäres Login-Journal (struct-basiert)
+    9.  MySQL Error Log        — 8.x und 5.7 Format
+    10. MySQL General Log      — Query-Log
+    11. OpenVPN Log            — Verbindungs- und Trennungs-Events
+    12. sysmon for Linux       — XML-Events in Syslog (Sysinternals)
+    13. ISO-Timestamp          — Windows Event Log Text-Export (Fallback)
+    14. Pipe-delimited         — Timeline-Format (Fallback)
+    15. Generic                — Unbekannte Formate (letzter Fallback)
+
+Verwendung:
+    parser = LogParser()
+    events = parser.parse(Path("/var/log/auth.log"))
+    # events: Liste von dicts mit Feldern: timestamp, event_type, source,
+    #         description, metadata (format-abhängig)
+
+Architektur (Format-Erkennung):
+    detect_format() analysiert Dateiname, Erweiterung und erste Zeilen,
+    um den passenden Parser zu wählen. Die Reihenfolge der Checks entspricht
+    der Häufigkeit im Praxis-Einsatz (Syslog zuerst, Generic zuletzt).
+
+Abhängigkeiten:
+    - re, json, struct, subprocess, pathlib (stdlib)
+    - datetime, timezone (stdlib, für UTC-Normalisierung)
+
+Kontext: LFX Forensic Analysis System — Pipeline Stage 3 (Log-Parsing)
+================================================================================
 """
 
 import re
@@ -146,11 +169,24 @@ MONTHS = {
     'Jul': 7, 'Aug': 8, 'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
 }
 
-# wtmp/btmp: C-struct "utmp" (Linux, 384 Bytes je Record)
-# struct utmp { short ut_type; int ut_pid; char ut_line[32]; char ut_id[4];
-#               char ut_user[32]; char ut_host[256]; ... struct timeval ut_tv; ... }
-UTMP_STRUCT_SIZE = 384
-UTMP_STRUCT_FMT  = '<hi32s4s32s256s4si2I4I20s'
+# ─── wtmp/btmp Binärformate ───────────────────────────────────────────────────
+#
+# Format A — klassisches utmp (glibc < 2.31, 32-bit & ältere 64-bit Systeme)
+#   struct utmp { short ut_type; int ut_pid; char ut_line[32]; char ut_id[4];
+#                 char ut_user[32]; char ut_host[256]; ... struct timeval(32-bit) ... }
+#   384 Bytes / Record
+#
+# Format B — utmpx (glibc >= 2.31, Ubuntu 22.04+, systemd 250+, 64-bit)
+#   Identische Felder, aber ut_session als long (8 Byte) statt int (4 Byte)
+#   und timeval mit 64-Bit-Feldern → 400 Bytes / Record
+#
+# Auto-Erkennung: Dateigroesse muss durch Record-Size teilbar sein.
+# ─────────────────────────────────────────────────────────────────────────────
+UTMP_STRUCT_SIZE  = 384
+UTMP_STRUCT_FMT   = '<hi32s4s32s256s4si2I4I20s'   # 382 Bytes + 2 Padding = 384
+
+UTMPX_STRUCT_SIZE = 400
+UTMPX_STRUCT_FMT  = '<hi32s4s32s256s4sqi2I4I20s'  # ut_session als long (q=8B) = 400
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -948,27 +984,67 @@ class LogParser:
 
     def _parse_journal_via_journalctl(self, journal_path: Path) -> List[Dict]:
         """
-        Liest eine binäre .journal-Datei via 'journalctl --file --output=json'.
-        Benötigt journalctl (im System verfügbar).
+        Liest eine binaere .journal-Datei via 'journalctl --file --output=json'.
+        Benoetigt journalctl (im System verfuegbar).
+
+        Fehlerresistenz:
+        - Korrupte JSON-Eintraege werden einzeln uebersprungen (nicht abgebrochen)
+        - Bei nicht-null Exit-Code wird dennoch versucht, die vorhandene Ausgabe zu parsen
+        - Parse-Fehler werden gezaehlt und am Ende als Warnung ausgegeben
+        - Bei journalctl-Absturz wird ein Fallback-Aufruf mit --merge versucht
         """
         events = []
-        try:
-            result = subprocess.run(
-                ['journalctl', '--file', str(journal_path), '--output=json', '--no-pager'],
-                capture_output=True, text=True, timeout=120
+        parse_errors = 0
+
+        def _run_journalctl(extra_flags: list = None) -> Optional[str]:
+            """Hilfsfunktion: journalctl ausfuehren, stdout zurueckgeben."""
+            cmd = ['journalctl', '--file', str(journal_path),
+                   '--output=json', '--no-pager'] + (extra_flags or [])
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                if result.returncode != 0 and not result.stdout.strip():
+                    logger.warning(
+                        f"journalctl Exit-Code {result.returncode}: {result.stderr[:200]}"
+                    )
+                    return result.stdout  # Partial output trotzdem verarbeiten
+                return result.stdout
+            except subprocess.TimeoutExpired:
+                logger.error("journalctl Timeout nach 120s — partielle Ergebnisse werden verarbeitet.")
+                return None
+            except FileNotFoundError:
+                logger.warning("journalctl nicht gefunden — Journal kann nicht gelesen werden.")
+                return None
+            except Exception as e:
+                logger.error(f"journalctl Fehler: {e}")
+                return None
+
+        stdout = _run_journalctl()
+
+        # Fallback: --merge falls Hauptaufruf keine Ausgabe lieferte
+        if not stdout or not stdout.strip():
+            logger.info("Journal: Hauptaufruf ohne Ausgabe, versuche Fallback mit --merge...")
+            stdout = _run_journalctl(['--merge'])
+
+        if not stdout:
+            return events
+
+        for i, line in enumerate(stdout.splitlines()):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = self._parse_journal_json_line(line, i + 1)
+                if event:
+                    events.append(event)
+            except Exception as e:
+                parse_errors += 1
+                logger.debug(f"Journal-Eintrag #{i + 1} uebersprungen (korrupt): {e}")
+
+        if parse_errors > 0:
+            logger.warning(
+                f"Journal: {parse_errors} korrupte Eintraege uebersprungen, "
+                f"{len(events)} Events erfolgreich gelesen."
             )
-            for i, line in enumerate(result.stdout.splitlines()):
-                line = line.strip()
-                if line:
-                    event = self._parse_journal_json_line(line, i + 1)
-                    if event:
-                        events.append(event)
-        except FileNotFoundError:
-            logger.warning("journalctl nicht gefunden — Journal kann nicht gelesen werden.")
-        except subprocess.TimeoutExpired:
-            logger.error("journalctl Timeout nach 120s.")
-        except Exception as e:
-            logger.error(f"Journal-Fehler: {e}")
         return events
 
     # ═══════════════════════════════════════════════════════════════════════
@@ -1099,22 +1175,41 @@ class LogParser:
     # 8. wtmp / btmp (Binäres Login-Journal)
     # ═══════════════════════════════════════════════════════════════════════
 
+    def _detect_wtmp_format(self, data: bytes) -> Tuple[int, str]:
+        """
+        Erkennt automatisch das wtmp-Record-Format anhand der Dateigroesse.
+
+        Gibt (record_size, struct_format) zurueck.
+        Bevorzugt das Format dessen Groesse die Dateilaenge restlos teilt.
+        Fallback: klassisches 384-Byte-Format.
+        """
+        file_size = len(data)
+        if file_size == 0:
+            return UTMP_STRUCT_SIZE, UTMP_STRUCT_FMT
+
+        for size, fmt in [(UTMPX_STRUCT_SIZE, UTMPX_STRUCT_FMT),
+                          (UTMP_STRUCT_SIZE, UTMP_STRUCT_FMT)]:
+            if file_size % size == 0:
+                logger.debug(f"wtmp-Format erkannt: {size} Bytes/Record "
+                             f"({'utmpx/modern' if size == UTMPX_STRUCT_SIZE else 'utmp/classic'})")
+                return size, fmt
+
+        # Keines teilt exakt — klassisches Format als Fallback
+        logger.warning(
+            f"wtmp-Dateigroesse ({file_size} Bytes) nicht durch 384 oder 400 teilbar. "
+            f"Verwende klassisches 384-Byte-Format als Fallback."
+        )
+        return UTMP_STRUCT_SIZE, UTMP_STRUCT_FMT
+
     def _parse_wtmp(self, file_path: Path) -> List[Dict]:
         """
-        Liest wtmp / btmp / utmpdb Binär-Dateien.
+        Liest wtmp / btmp / utmpdb Binaer-Dateien.
 
-        Die Datei besteht aus fixen 384-Byte-Records im C-struct-Format:
-            struct utmp {
-                short  ut_type;       // Typ (USER_PROCESS=7, DEAD_PROCESS=8, ...)
-                int    ut_pid;
-                char   ut_line[32];   // Terminal (z.B. pts/0)
-                char   ut_id[4];
-                char   ut_user[32];   // Benutzername
-                char   ut_host[256];  // Hostname / IP
-                ...
-                struct timeval ut_tv; // Timestamp (sec + usec)
-                ...
-            }
+        Unterstuetzt zwei Record-Formate:
+          - Klassisches utmp  (384 Bytes) — aeltere Systeme, 32-bit
+          - Modernes utmpx    (400 Bytes) — Ubuntu 22.04+, systemd 250+, glibc >= 2.31
+
+        Das Format wird automatisch anhand der Dateigroesse erkannt.
 
         Quellen:
         - /var/log/wtmp   — erfolgreiche Logins
@@ -1140,13 +1235,14 @@ class LogParser:
             logger.error(f"wtmp/btmp nicht lesbar: {e}")
             return []
 
+        record_size, struct_fmt = self._detect_wtmp_format(data)
         offset = 0
         record_count = 0
 
-        while offset + UTMP_STRUCT_SIZE <= len(data):
+        while offset + record_size <= len(data):
             try:
-                record = struct.unpack_from(UTMP_STRUCT_FMT, data, offset)
-                offset += UTMP_STRUCT_SIZE
+                record = struct.unpack_from(struct_fmt, data, offset)
+                offset += record_size
                 record_count += 1
 
                 ut_type = record[0]

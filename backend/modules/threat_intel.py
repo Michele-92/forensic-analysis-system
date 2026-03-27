@@ -1,8 +1,42 @@
 """
-Threat Intelligence Lookup.
+================================================================================
+THREAT INTEL LOOKUP — IOC-Abgleich gegen Knowledge-Base und externe APIs
+================================================================================
+Prüft extrahierte Indicators of Compromise (IOCs) aus der forensischen Analyse
+gegen bekannte Bedrohungsquellen und gibt eine strukturierte Risikobewertung
+zurück. Unterstützt Einzel-Lookups und Batch-Verarbeitung.
 
-Gleicht IOCs gegen eine lokale Knowledge-Base (rag/knowledge_base/iocs.json)
-und optional gegen die AbuseIPDB API ab.
+Zwei Lookup-Quellen (priorisiert in dieser Reihenfolge):
+    1. Lokale Knowledge-Base (rag/knowledge_base/iocs.json):
+       Offline verfügbar, kein API-Key nötig. Enthält bekannte C2-IPs,
+       Malware-Domains und Prozessnamen aus dem Forensik-Kontext.
+
+    2. AbuseIPDB API (optional, nur für IP-Adressen):
+       Externe Reputation-Datenbank mit Abuse-Score (0–100%).
+       Aktiviert wenn ABUSEIPDB_API_KEY in .env gesetzt ist.
+
+Verdikt-Schema:
+    "malicious"  — Hohe Konfidenz: bekannte Bedrohung (AbuseScore ≥ 50 oder KB high)
+    "suspicious" — Mittlere Konfidenz: Hinweis auf Bedrohung
+    "clean"      — Keine Übereinstimmung in Quellen
+    "unknown"    — Keine Quellen verfügbar oder Fehler
+
+Verwendung:
+    intel = ThreatIntelLookup()
+
+    # Einzel-Lookup:
+    result = intel.lookup("192.168.1.100", "ip")
+    # → {'value': '...', 'verdict': 'suspicious', 'sources': [...]}
+
+    # Batch-Lookup (typisch nach AIPreprocessor):
+    results = intel.lookup_batch({'ips': [...], 'domains': [...], 'processes': [...]})
+
+Abhängigkeiten:
+    - json, logging, pathlib, os (stdlib)
+    - requests (für AbuseIPDB API, optional)
+
+Kontext: LFX Forensic Analysis System — Threat Intelligence Schicht
+================================================================================
 """
 
 import json

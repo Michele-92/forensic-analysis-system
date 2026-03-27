@@ -1,3 +1,42 @@
+/**
+ * ============================================================================
+ * AGENT ANALYSIS VIEW — Multi-Agenten LLM-Analyse mit SSE-Streaming
+ * ============================================================================
+ * Startet und visualisiert die 3-stufige Multi-Agenten-Analyse des aktiven
+ * Jobs. Die Agenten arbeiten sequentiell und reichen ihre Ergebnisse
+ * aneinander weiter (Triage → Analyst → Reporter).
+ *
+ * Die drei Agenten:
+ *   1. Triage Agent (SOC Level 1):
+ *      Klassifiziert Anomalien als KRITISCH / VERDÄCHTIG / FALSE_POSITIVE.
+ *      Ausgabe: strukturierter JSON-Report pro Anomalie.
+ *
+ *   2. Analyst Agent (Senior DFIR):
+ *      Erhält Triage-Ergebnis, führt Tiefenanalyse durch:
+ *      Event-Korrelation, MITRE ATT&CK Mapping, Lateral-Movement-Erkennung.
+ *
+ *   3. Reporter Agent (Forensic Writer):
+ *      Erhält Triage + DFIR-Analyse, erstellt den gerichtsverwertbaren
+ *      Markdown-Report mit Executive Summary und Empfehlungen.
+ *
+ * Streaming via SSE:
+ *   Jeder Agent sendet Tokens in Echtzeit über Server-Sent Events.
+ *   Die Komponente rendert jeden Token sofort in der jeweiligen Agent-Karte.
+ *   Am Ende wird das vollständige Ergebnis in updateJobData() gespeichert.
+ *
+ * Analyse-Modus:
+ *   Über den Modus-Selektor kann zwischen 'standard' (Opfer-Perspektive)
+ *   und 'attacker_infra' (Täter-Perspektive) gewechselt werden.
+ *
+ * Props: keine — liest activeJob und updateJobData aus dem AppContext.
+ *
+ * Abhängigkeiten:
+ *   - api/llm.js       (runAgentAnalysis — SSE-Streaming)
+ *   - marked, DOMPurify (Markdown-Rendering der Agent-Outputs)
+ *   - AppContext        (activeJob, updateJobData)
+ *
+ * @module components/intelligence/AgentAnalysisView
+ */
 import React, { useState } from 'react'
 import { useApp } from '../../context/AppContext'
 import { runAgentAnalysis } from '../../api/llm'
@@ -36,9 +75,9 @@ const AGENTS = [
 ]
 
 const INITIAL_STATES = {
-  triage: { status: 'pending', result: null },
-  analyst: { status: 'pending', result: null },
-  reporter: { status: 'pending', result: null },
+  triage: { status: 'pending', result: null, partial: '' },
+  analyst: { status: 'pending', result: null, partial: '' },
+  reporter: { status: 'pending', result: null, partial: '' },
 }
 
 export default function AgentAnalysisView() {
@@ -70,21 +109,33 @@ export default function AgentAnalysisView() {
 
       await runAgentAnalysis(activeJob.job_id, (event) => {
         if (event.agent && event.status) {
-          setAgentStates((prev) => ({
-            ...prev,
-            [event.agent]: {
-              status: event.status === 'done' ? 'done' : event.status === 'error' ? 'error' : 'running',
-              result: event.result || event.error || null,
-            },
-          }))
-
-          if (event.status === 'done') {
+          if (event.status === 'streaming' && event.token) {
+            setAgentStates((prev) => ({
+              ...prev,
+              [event.agent]: {
+                ...prev[event.agent],
+                status: 'running',
+                partial: (prev[event.agent].partial || '') + event.token,
+              },
+            }))
+          } else if (event.status === 'done') {
             results[event.agent] = event.result
+            setAgentStates((prev) => ({
+              ...prev,
+              [event.agent]: { status: 'done', result: event.result, partial: '' },
+            }))
             setExpandedAgent(event.agent)
-          }
-
-          if (event.status === 'error') {
+          } else if (event.status === 'error') {
+            setAgentStates((prev) => ({
+              ...prev,
+              [event.agent]: { status: 'error', result: event.error || null, partial: '' },
+            }))
             setError(`Agent "${event.agent}" fehlgeschlagen: ${event.error}`)
+          } else if (event.status === 'running') {
+            setAgentStates((prev) => ({
+              ...prev,
+              [event.agent]: { ...prev[event.agent], status: 'running' },
+            }))
           }
         }
 
@@ -249,6 +300,19 @@ function AgentCard({ agent, state, index, expanded, onToggle }) {
             className="h-full animate-pulse"
             style={{ backgroundColor: agent.colorHex, width: '60%' }}
           />
+        </div>
+      )}
+
+      {/* Live Streaming Text */}
+      {isRunning && state.partial && (
+        <div className="px-4 pb-3 border-t border-white/[0.04]">
+          <div
+            className="mt-2 text-[11px] text-white/50 leading-relaxed font-mono
+                        max-h-48 overflow-y-auto whitespace-pre-wrap"
+          >
+            {state.partial}
+            <span className="animate-pulse" style={{ color: agent.colorHex }}>▋</span>
+          </div>
         </div>
       )}
 

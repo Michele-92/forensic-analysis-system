@@ -1,18 +1,66 @@
+/**
+ * ============================================================================
+ * INTELLIGENCE PANEL — Threat Intelligence Hub
+ * ============================================================================
+ * Hauptcontainer der Intelligence-Ansicht. Bündelt alle bedrohungsbezogenen
+ * Analysen in drei Sub-Tabs:
+ *
+ *   1. "Threat Intelligence" (Standard):
+ *      - KI-Bedrohungsanalyse via Ollama (On-Demand)
+ *      - Attack Kill Chain (AttackGraph)
+ *      - Multi-Agent LLM Analyse (AgentAnalysisView)
+ *      - Bewertete Anomalie-Liste (AnomalyList)
+ *
+ *   2. "Täterinfrastruktur":
+ *      - Fokus auf Angreifer-Perspektive: C2, VPN, Tool-Staging, Exfiltration
+ *      - MITRE ATT&CK Kill Chain Coverage (aufgeteilt in Täter- vs. Opfer-Taktiken)
+ *      - Gefilterte Infrastruktur-Event-Liste (InfraEventRow)
+ *
+ *   3. "Anti-Forensics":
+ *      - Weiterleitung an AntiForensicsPanel mit antiforensics-Report-Daten
+ *
+ * Props: keine — liest `activeJob` und `updateJobData` aus dem AppContext.
+ *
+ * Abhängigkeiten:
+ *   - AppContext (activeJob, updateJobData)
+ *   - AnomalyList, AttackGraph, AgentAnalysisView, AntiForensicsPanel
+ *   - api/llm (analyzeAnomaliesLocal)
+ *   - marked, DOMPurify (Markdown-Rendering mit XSS-Sanitierung)
+ *   - lucide-react (diverse Icons)
+ *
+ * @component
+ */
 import React, { useState, useMemo } from 'react'
 import { useApp } from '../../context/AppContext'
 import AnomalyList from './AnomalyList'
 import AttackGraph from './AttackGraph'
 import AgentAnalysisView from './AgentAnalysisView'
+import AntiForensicsPanel from './AntiForensicsPanel'
 import { analyzeAnomaliesLocal } from '../../api/llm'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import {
   Sparkles, Loader2, Brain, Check,
   Shield, Target, Server, Network, AlertOctagon,
-  Package, Key, ArrowRight,
+  Package, Key, ArrowRight, ShieldOff,
 } from 'lucide-react'
 
-// ── MITRE Taktik-Kategorien für Täterinfrastruktur ────────────────────────────
+// ── Konstanten auf Modul-Ebene (außerhalb der Komponente) ─────────────────────
+
+/**
+ * Event-Typen, die auf Täterinfrastruktur hinweisen.
+ * Wird für die Filterung des "Täterinfrastruktur"-Tabs verwendet.
+ */
+const INFRA_EVENT_TYPES = new Set([
+  'c2_beacon', 'c2_tool', 'vpn_connection', 'vpn_disconnect', 'vpn_ip_assigned',
+  'dns_query', 'network_connect', 'suspicious_tool_installed', 'package_install',
+  'reverse_shell_attempt',
+])
+
+/**
+ * MITRE ATT&CK Taktiken, die der Angreifer-Infrastruktur zuzuordnen sind.
+ * Alle anderen Taktiken werden als "Angriff auf Opfersystem" klassifiziert.
+ */
 const ATTACKER_INFRA_TACTICS = new Set([
   'Resource Development',
   'Command and Control',
@@ -20,7 +68,10 @@ const ATTACKER_INFRA_TACTICS = new Set([
   'Lateral Movement',
 ])
 
-// Taktik → Icon + Farbe
+/**
+ * Mapping von MITRE-Taktik-Namen auf Icon-Komponente und Farbklassen.
+ * Wird für die Kill-Chain-Coverage-Darstellung im Täterinfrastruktur-Tab genutzt.
+ */
 const TACTIC_CONFIG = {
   'Resource Development':   { icon: Package,      color: 'text-accent-purple', bg: 'bg-accent-purple/10' },
   'Command and Control':    { icon: Network,      color: 'text-risk-critical', bg: 'bg-risk-critical/10' },
@@ -37,20 +88,31 @@ const TACTIC_CONFIG = {
   'Reconnaissance':         { icon: Network,      color: 'text-accent-blue',   bg: 'bg-accent-blue/10' },
 }
 
+// ── Hauptkomponente ────────────────────────────────────────────────────────────
+
+/**
+ * Threat Intelligence Hub mit drei Analyse-Perspektiven.
+ * Verwaltet Tab-Zustand und triggert On-Demand Ollama-Analyse.
+ */
 export default function IntelligencePanel() {
   const { activeJob, updateJobData } = useApp()
+
+  /** Ladeindikator für die Ollama Quick-Analyse */
   const [llmLoading, setLlmLoading]   = useState(false)
-  const [activeTab, setActiveTab]     = useState('threat') // 'threat' | 'attacker_infra'
+
+  /** Aktiver Tab: 'threat' | 'attacker_infra' | 'antiforensics' */
+  const [activeTab, setActiveTab]     = useState('threat')
 
   const data = activeJob?.data
-  if (!data) return null
 
-  const anomalies = data.anomalies || []
+  // Null-sichere Datenzugriffe — useMemo muss VOR jedem early return stehen (Rules of Hooks)
+  const anomalies = data?.anomalies || []
 
-  // Gespeicherte Quick-Analyse aus Job-Daten laden
-  const llmInsight = data.llmQuickAnalysis || null
-
-  // MITRE Taktik-Zusammenfassung aus Anomalien berechnen
+  /**
+   * Aggregiert MITRE-Taktiken aus allen Anomalien.
+   * Ergebnis: Array von { tactic, count }, absteigend sortiert.
+   * Wird im Täterinfrastruktur-Tab für die Kill-Chain-Coverage benötigt.
+   */
   const tacticSummary = useMemo(() => {
     const counts = {}
     for (const a of anomalies) {
@@ -63,24 +125,35 @@ export default function IntelligencePanel() {
       .sort((a, b) => b.count - a.count)
   }, [anomalies])
 
-  // Täterinfrastruktur-Taktiken separieren
-  const infraTactics  = tacticSummary.filter(t => ATTACKER_INFRA_TACTICS.has(t.tactic))
-  const victimTactics = tacticSummary.filter(t => !ATTACKER_INFRA_TACTICS.has(t.tactic))
-
-  // C2/Infra-Events extrahieren
-  const infraEventTypes = new Set([
-    'c2_beacon', 'c2_tool', 'vpn_connection', 'vpn_disconnect', 'vpn_ip_assigned',
-    'dns_query', 'network_connect', 'suspicious_tool_installed', 'package_install',
-    'reverse_shell_attempt',
-  ])
+  /**
+   * Filtert Anomalien, die auf Täterinfrastruktur hinweisen:
+   * Entweder per Event-Typ (INFRA_EVENT_TYPES) oder
+   * per MITRE-Taktik (ATTACKER_INFRA_TACTICS).
+   */
   const infraAnomalies = useMemo(
     () => anomalies.filter(a =>
-      infraEventTypes.has(a.event_type) ||
+      INFRA_EVENT_TYPES.has(a.event_type) ||
       (a.mitre_techniques || []).some(t => ATTACKER_INFRA_TACTICS.has(t.tactic))
     ),
     [anomalies]
   )
 
+  // Early return NACH allen Hooks
+  if (!data) return null
+
+  /** Gespeichertes Ergebnis einer früheren Ollama-Analyse (aus Job-Daten) */
+  const llmInsight    = data.llmQuickAnalysis || null
+
+  /** Taktiken die der Angreifer-Infrastruktur zugeordnet werden */
+  const infraTactics  = tacticSummary.filter(t => ATTACKER_INFRA_TACTICS.has(t.tactic))
+
+  /** Taktiken die dem Angriff auf das Opfersystem zugeordnet werden */
+  const victimTactics = tacticSummary.filter(t => !ATTACKER_INFRA_TACTICS.has(t.tactic))
+
+  /**
+   * Startet die lokale Ollama-Bedrohungsanalyse der Anomalien.
+   * Speichert das Ergebnis im Job-State (bleibt bei Tab-Wechsel erhalten).
+   */
   const handleAnalyze = async () => {
     setLlmLoading(true)
     try {
@@ -96,7 +169,7 @@ export default function IntelligencePanel() {
   return (
     <div className="space-y-6">
 
-      {/* ── Tab-Switcher: Threat Intelligence vs. Täterinfrastruktur ── */}
+      {/* ── Tab-Switcher: Threat Intelligence vs. Täterinfrastruktur vs. Anti-Forensics ── */}
       {anomalies.length > 0 && (
         <div className="flex items-center gap-1 p-1 rounded-xl bg-white/[0.03] border border-white/[0.05] w-fit">
           <button
@@ -120,9 +193,27 @@ export default function IntelligencePanel() {
           >
             <Target size={14} className={activeTab === 'attacker_infra' ? 'text-risk-critical' : 'text-white/30'} />
             Täterinfrastruktur
+            {/* Badge zeigt Anzahl der Infrastruktur-Anomalien */}
             {infraAnomalies.length > 0 && (
               <span className="text-[9px] bg-risk-critical/20 text-risk-critical px-1.5 py-0.5 rounded-full">
                 {infraAnomalies.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab('antiforensics')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              activeTab === 'antiforensics'
+                ? 'bg-white/[0.08] text-white'
+                : 'text-white/40 hover:text-white/60'
+            }`}
+          >
+            <ShieldOff size={14} className={activeTab === 'antiforensics' ? 'text-risk-high' : 'text-white/30'} />
+            Anti-Forensics
+            {/* Badge zeigt Anzahl der Anti-Forensik-Befunde */}
+            {data?.antiforensics?.findings_count > 0 && (
+              <span className="text-[9px] bg-risk-high/20 text-risk-high px-1.5 py-0.5 rounded-full">
+                {data.antiforensics.findings_count}
               </span>
             )}
           </button>
@@ -134,7 +225,7 @@ export default function IntelligencePanel() {
       {/* ══════════════════════════════════════════════════════════════════ */}
       {activeTab === 'threat' && (
         <>
-          {/* LLM Quick Analysis */}
+          {/* ── LLM Quick Analysis (Ollama, On-Demand) ── */}
           {anomalies.length > 0 && (
             <div className="glass-card">
               <div className="flex items-center justify-between mb-3">
@@ -142,6 +233,7 @@ export default function IntelligencePanel() {
                   <Brain size={14} className="text-accent-purple" />
                   KI Threat Intelligence (Ollama)
                 </h3>
+                {/* Button-Icon wechselt je nach Zustand: Sparkles / Loader / Check */}
                 <button
                   onClick={handleAnalyze}
                   disabled={llmLoading}
@@ -158,6 +250,7 @@ export default function IntelligencePanel() {
                 </button>
               </div>
 
+              {/* Markdown-gerenderte LLM-Antwort (mit XSS-Sanitierung via DOMPurify) */}
               {llmInsight && (
                 <div
                   className="report-content text-sm"
@@ -180,13 +273,13 @@ export default function IntelligencePanel() {
             </div>
           )}
 
-          {/* Attack Kill Chain */}
+          {/* ── MITRE ATT&CK Kill Chain Visualisierung ── */}
           {anomalies.length > 0 && <AttackGraph anomalies={anomalies} />}
 
-          {/* Multi-Agent Analysis */}
+          {/* ── Multi-Agent LLM Analyse (Triage → Analyst → Reporter) ── */}
           {anomalies.length > 0 && <AgentAnalysisView />}
 
-          {/* Anomaly List */}
+          {/* ── Vollständige bewertete Anomalie-Liste ── */}
           <AnomalyList anomalies={anomalies} />
         </>
       )}
@@ -197,7 +290,7 @@ export default function IntelligencePanel() {
       {activeTab === 'attacker_infra' && (
         <div className="space-y-6">
 
-          {/* Erklärungstext */}
+          {/* ── Erklärungstext: Perspektiven-Unterschied Täter vs. Opfer ── */}
           <div className="glass-card border border-accent-blue/10 bg-accent-blue/[0.03]">
             <div className="flex items-start gap-3">
               <Target size={16} className="text-accent-blue flex-shrink-0 mt-0.5" />
@@ -212,7 +305,7 @@ export default function IntelligencePanel() {
             </div>
           </div>
 
-          {/* MITRE ATT&CK Kill Chain Coverage */}
+          {/* ── MITRE ATT&CK Kill Chain Coverage (aufgeteilt) ── */}
           {tacticSummary.length > 0 && (
             <div className="glass-card">
               <h3 className="text-sm font-medium text-white/50 mb-4 flex items-center gap-2">
@@ -220,7 +313,7 @@ export default function IntelligencePanel() {
                 MITRE ATT&CK Kill Chain Coverage
               </h3>
 
-              {/* Täterinfrastruktur-Taktiken */}
+              {/* Täterinfrastruktur-Taktiken: Grid-Karten mit Icon und Zähler */}
               {infraTactics.length > 0 && (
                 <div className="mb-4">
                   <div className="text-[10px] text-risk-critical uppercase tracking-wider mb-2 flex items-center gap-1.5">
@@ -245,7 +338,7 @@ export default function IntelligencePanel() {
                 </div>
               )}
 
-              {/* Server-seitige Taktiken */}
+              {/* Opfersystem-Taktiken: kompaktere Chip-Darstellung */}
               {victimTactics.length > 0 && (
                 <div>
                   <div className="text-[10px] text-white/30 uppercase tracking-wider mb-2">Angriffs-Taktiken (Opfersystem)</div>
@@ -271,7 +364,7 @@ export default function IntelligencePanel() {
             </div>
           )}
 
-          {/* Täterinfrastruktur-Events */}
+          {/* ── Infrastruktur-Indikatoren: expandierbare Event-Zeilen ── */}
           {infraAnomalies.length > 0 ? (
             <div className="glass-card">
               <h3 className="text-sm font-medium text-white/50 mb-3 flex items-center gap-2">
@@ -282,6 +375,7 @@ export default function IntelligencePanel() {
                 </span>
               </h3>
               <div className="space-y-2">
+                {/* Maximal 50 Events anzeigen, Rest wird durch "+ N weitere" angezeigt */}
                 {infraAnomalies.slice(0, 50).map((event, idx) => (
                   <InfraEventRow key={idx} event={event} />
                 ))}
@@ -302,10 +396,17 @@ export default function IntelligencePanel() {
             </div>
           )}
 
-          {/* Alle Anomalien (gefiltert nach MITRE-Infra-Taktiken) */}
+          {/* ── Anomalie-Liste gefiltert auf MITRE-Infra-Taktiken ── */}
           <AnomalyList anomalies={anomalies} filterTactics={ATTACKER_INFRA_TACTICS} />
 
         </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════ */}
+      {/* TAB: Anti-Forensics (FA-23) */}
+      {/* ══════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'antiforensics' && (
+        <AntiForensicsPanel antiforensics={data?.antiforensics} />
       )}
 
     </div>
@@ -314,16 +415,29 @@ export default function IntelligencePanel() {
 
 // ── Einzelne Infra-Event-Zeile ─────────────────────────────────────────────────
 
+/**
+ * Komprimierte Zeile für ein einzelnes Infrastruktur-Event.
+ * Per Klick expandierbar, zeigt dann vollständige MITRE-Techniken
+ * und Netzwerk-Metadaten (IPs, Port, Nutzer, Zeitstempel).
+ *
+ * @param {Object} props
+ * @param {Object} props.event - Anomalie-Event mit Infrastruktur-Bezug
+ */
 function InfraEventRow({ event }) {
   const [expanded, setExpanded] = useState(false)
 
   const techniques = event.mitre_techniques || []
+
+  // Netzwerk-Metadaten aus direkten Feldern oder metadata-Objekt extrahieren
   const src_ip  = event.src_ip  || event.metadata?.src_ip  || event.client_ip || ''
   const dst_ip  = event.dst_ip  || event.metadata?.dst_ip  || ''
   const user    = event.user    || event.metadata?.user    || ''
   const port    = event.dst_port || event.metadata?.dst_port || ''
 
-  // Event-Typ → Farbe
+  /**
+   * Farbkodierung nach Event-Typ — kritische Typen (C2, Reverse Shell)
+   * erscheinen in Rot, weniger kritische in Orange/Blau/Lila.
+   */
   const TYPE_COLORS = {
     'c2_beacon':               'text-risk-critical',
     'reverse_shell_attempt':   'text-risk-critical',
@@ -340,25 +454,26 @@ function InfraEventRow({ event }) {
       className="rounded-xl bg-white/[0.02] border border-white/[0.04] hover:border-white/[0.07] transition-all cursor-pointer"
       onClick={() => setExpanded(prev => !prev)}
     >
+      {/* ── Zusammengeklappte Zeile ── */}
       <div className="flex items-center gap-3 px-3 py-2.5">
-        {/* Event-Typ */}
+        {/* Event-Typ: farbkodiert, Monospace, feste Breite */}
         <span className={`text-xs font-mono font-medium ${typeColor} flex-shrink-0 w-48 truncate`}>
           {event.event_type}
         </span>
 
-        {/* Beschreibung */}
+        {/* Kurzbeschreibung: message bevorzugt, fällt auf description zurück */}
         <span className="text-xs text-white/50 flex-1 truncate">
           {event.message || event.description || '—'}
         </span>
 
-        {/* IPs */}
+        {/* IP-Verbindung: src → dst:port in kompakter Notation */}
         {(src_ip || dst_ip) && (
           <span className="text-[10px] font-mono text-white/25 flex-shrink-0">
             {src_ip}{src_ip && dst_ip ? ' → ' : ''}{dst_ip}{port ? `:${port}` : ''}
           </span>
         )}
 
-        {/* MITRE-Badges */}
+        {/* MITRE-Badges: max. 2 sichtbar, Rest als "+N" */}
         {techniques.length > 0 && (
           <div className="flex items-center gap-1 flex-shrink-0">
             {techniques.slice(0, 2).map((t, i) => (
@@ -373,10 +488,10 @@ function InfraEventRow({ event }) {
         )}
       </div>
 
-      {/* Expandiertes Detail */}
+      {/* ── Expandiertes Detail ── */}
       {expanded && (
         <div className="border-t border-white/[0.04] px-3 py-3 space-y-2">
-          {/* Alle MITRE-Techniken */}
+          {/* Alle MITRE-Techniken mit vollständigem Namen und Taktik */}
           {techniques.length > 0 && (
             <div>
               <span className="text-[9px] text-white/25 uppercase tracking-wider block mb-1.5">MITRE ATT&CK</span>
@@ -392,7 +507,7 @@ function InfraEventRow({ event }) {
             </div>
           )}
 
-          {/* Metadaten */}
+          {/* Netzwerk-Metadaten im 3-Spalten-Grid */}
           <div className="grid grid-cols-3 gap-2 text-xs">
             {src_ip  && <InfoCell label="Quell-IP"    value={src_ip} />}
             {dst_ip  && <InfoCell label="Ziel-IP"     value={dst_ip} />}
@@ -407,6 +522,15 @@ function InfraEventRow({ event }) {
   )
 }
 
+// ── Metadaten-Zelle ────────────────────────────────────────────────────────────
+
+/**
+ * Einfache Label + Wert Darstellung für die Detail-Expansion von InfraEventRow.
+ *
+ * @param {Object} props
+ * @param {string} props.label - Beschriftung (z.B. "Quell-IP")
+ * @param {string} props.value - Anzuzeigender Wert
+ */
 function InfoCell({ label, value }) {
   return (
     <div>

@@ -1,3 +1,23 @@
+/**
+ * ============================================================================
+ * ANALYTICS PANEL — Zeitliche & Artefakt-Analyse
+ * ============================================================================
+ * Hauptcontainer der Analytics-Ansicht. Bündelt vier Analyse-Perspektiven:
+ *   1. Partition-Selector: Dropdown für Multi-Partition Disk-Images — nur
+ *      sichtbar, wenn das Image mehr als eine Partition enthält.
+ *   2. Timeline Chart: Stündliche Event-Dichte + Anomalie-Scatter (Recharts).
+ *   3. Artifact Taxonomy: Kreisdiagramm der Artefakt-Typ-Verteilung.
+ *   4. Event Table: Vollständige, filterbare und sortierbare Event-Liste.
+ *
+ * Props: keine — liest `activeJob` aus dem globalen AppContext.
+ *
+ * Abhängigkeiten:
+ *   - AppContext  (activeJob)
+ *   - TimelineChart, ArtifactTaxonomy, EventTable (Child-Komponenten)
+ *   - lucide-react (HardDrive, Layers, ChevronDown)
+ *
+ * @component
+ */
 import React, { useState, useMemo } from 'react'
 import { useApp } from '../../context/AppContext'
 import TimelineChart from './TimelineChart'
@@ -5,18 +25,42 @@ import ArtifactTaxonomy from './ArtifactTaxonomy'
 import EventTable from './EventTable'
 import { HardDrive, Layers, ChevronDown } from 'lucide-react'
 
+// ── Hauptkomponente ────────────────────────────────────────────────────────────
+
+/**
+ * Orchestriert die gesamte Analytics-Ansicht für den aktuell aktiven Job.
+ * Verwaltet den Partition-Filterzustand und leitet gefilterte Daten
+ * an alle Child-Komponenten weiter.
+ */
 export default function AnalyticsPanel() {
   const { activeJob } = useApp()
+
+  /** Aktuell gewählte Partition — 'all' bedeutet keine Filterung */
   const [selectedPartition, setSelectedPartition] = useState('all')
+
+  /** Steuert die Sichtbarkeit des Partition-Dropdowns */
   const [partitionDropdownOpen, setPartitionDropdownOpen] = useState(false)
 
   const data = activeJob?.data
-  if (!data) return null
 
-  const allTimeline = data.normalized?.timeline || data.preprocessed?.timeline || []
-  const anomalies   = data.anomalies || []
+  // Null-sichere Datenzugriffe — useMemo muss VOR jedem early return stehen (Rules of Hooks)
 
-  // Partitions aus der Timeline oder aus der Summary ermitteln
+  /**
+   * Vollständige Timeline — bevorzugt normalisierte Daten, fällt auf
+   * preprocessed-Daten zurück, wenn der Normalizer noch nicht gelaufen ist.
+   */
+  const allTimeline = data?.normalized?.timeline || data?.preprocessed?.timeline || []
+
+  /** Alle erkannten Anomalien aus dem IsolationForest-Schritt */
+  const anomalies   = data?.anomalies || []
+
+  /**
+   * Extrahiert alle eindeutigen Partitionen aus der Timeline.
+   * Partition-Informationen können direkt im Event oder im metadata-Objekt
+   * stehen — beide Varianten werden berücksichtigt.
+   *
+   * Ergebnis: Array von { label, filesystem, count }
+   */
   const partitions = useMemo(() => {
     const partitionMap = {}
     for (const event of allTimeline) {
@@ -33,9 +77,13 @@ export default function AnalyticsPanel() {
     return Object.values(partitionMap)
   }, [allTimeline])
 
+  /** true, wenn das Image mehr als eine Partition enthält */
   const hasMultiplePartitions = partitions.length > 1
 
-  // Timeline nach gewählter Partition filtern
+  /**
+   * Gefilterte Timeline — enthält bei Auswahl 'all' alle Events,
+   * sonst nur die Events der gewählten Partition.
+   */
   const timeline = useMemo(() => {
     if (selectedPartition === 'all' || !hasMultiplePartitions) return allTimeline
     return allTimeline.filter(e =>
@@ -43,7 +91,10 @@ export default function AnalyticsPanel() {
     )
   }, [allTimeline, selectedPartition, hasMultiplePartitions])
 
-  // Gefilterte Anomalien für Chart
+  /**
+   * Analog zu `timeline`: Anomalien gefiltert nach gewählter Partition.
+   * Wird separat berechnet, da Anomalien eine eigene Datenstruktur haben.
+   */
   const filteredAnomalies = useMemo(() => {
     if (selectedPartition === 'all' || !hasMultiplePartitions) return anomalies
     return anomalies.filter(e =>
@@ -51,6 +102,13 @@ export default function AnalyticsPanel() {
     )
   }, [anomalies, selectedPartition, hasMultiplePartitions])
 
+  // Early return NACH allen Hooks
+  if (!data) return null
+
+  /**
+   * Metadaten der aktuell gewählten Partition für die Label-Anzeige
+   * im Dropdown-Button (Filesystem-Typ, Event-Anzahl).
+   */
   const selectedInfo = selectedPartition === 'all'
     ? null
     : partitions.find(p => p.label === selectedPartition)
@@ -74,7 +132,7 @@ export default function AnalyticsPanel() {
               </div>
             </div>
 
-            {/* Dropdown */}
+            {/* Dropdown — zeigt Partition-Label, Filesystem und Event-Anzahl */}
             <div className="relative">
               <button
                 onClick={() => setPartitionDropdownOpen(prev => !prev)}
@@ -87,12 +145,14 @@ export default function AnalyticsPanel() {
                     : `${selectedPartition} · ${selectedInfo?.filesystem || '?'} · ${selectedInfo?.count ?? 0} Events`
                   }
                 </span>
+                {/* Pfeil dreht sich bei geöffnetem Dropdown */}
                 <ChevronDown
                   size={12}
                   className={`text-white/30 transition-transform ${partitionDropdownOpen ? 'rotate-180' : ''}`}
                 />
               </button>
 
+              {/* Dropdown-Menü — absolute positioniert unterhalb des Buttons */}
               {partitionDropdownOpen && (
                 <div
                   className="absolute right-0 top-full mt-1 w-72 rounded-xl bg-[#0d0d0d] border border-white/[0.08] shadow-2xl z-20 overflow-hidden"
@@ -112,7 +172,7 @@ export default function AnalyticsPanel() {
 
                   <div className="border-t border-white/[0.04]" />
 
-                  {/* Einzelne Partitionen */}
+                  {/* Einzelne Partitionen — eine Zeile pro erkannter Partition */}
                   {partitions.map(p => (
                     <button
                       key={p.label}
@@ -136,7 +196,7 @@ export default function AnalyticsPanel() {
             </div>
           </div>
 
-          {/* Partition-Info-Chips */}
+          {/* Partition-Info-Chips — schnelle Toggle-Chips unterhalb des Dropdowns */}
           <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-white/[0.04]">
             {partitions.map(p => (
               <button
@@ -157,7 +217,7 @@ export default function AnalyticsPanel() {
         </div>
       )}
 
-      {/* ── Charts Row ── */}
+      {/* ── Charts Row — Timeline (2/3 Breite) + Taxonomie (1/3 Breite) ── */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2">
           <TimelineChart
@@ -170,10 +230,11 @@ export default function AnalyticsPanel() {
         </div>
       </div>
 
-      {/* ── Event Table ── */}
+      {/* ── Event Table — volle Breite, mit aktivem Partition-Label ── */}
       <div>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-medium text-white/50">Event-Timeline</h3>
+          {/* Zeigt aktuell gewählte Partition als Kontext-Badge */}
           {hasMultiplePartitions && selectedPartition !== 'all' && (
             <span className="text-xs text-accent-blue font-mono bg-accent-blue/10 px-2 py-1 rounded-lg">
               {selectedPartition} · {selectedInfo?.filesystem}

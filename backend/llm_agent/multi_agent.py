@@ -1,13 +1,49 @@
 """
-Multi-Agent-Orchestrator fuer forensische Analyse.
+================================================================================
+MULTI-AGENT ORCHESTRATOR — Sequentielle 3-Agenten-Pipeline für forensische Analyse
+================================================================================
+Orchestriert drei spezialisierte LLM-Agenten die sequentiell arbeiten und
+ihre Ergebnisse aneinander weiterreichen:
 
-3 spezialisierte Agenten arbeiten sequentiell:
-  1. Triage (SOC Level 1) — Klassifizierung der Anomalien
-  2. Analyst (Senior DFIR) — Tiefenanalyse, Korrelation, MITRE ATT&CK
-  3. Reporter (Forensic Writer) — Gerichtsverwertbarer Bericht
+    Agent 1 — Triage (SOC Level 1):
+        Klassifiziert jede Anomalie in KRITISCH / VERDÄCHTIG / FALSE_POSITIVE.
+        Niedrige Temperatur (0.3) für konsistente, regelbasierte Klassifizierung.
 
-Jeder Agent hat einen eigenen Systemprompt (Charakter/Rolle) und bekommt
-den Output des vorherigen Agenten als Input.
+    Agent 2 — Analyst (Senior DFIR):
+        Erhält das Triage-Ergebnis und führt Tiefenanalyse durch:
+        Korrelation von Events, MITRE ATT&CK Mapping, Lateral-Movement-Analyse.
+        Mittlere Temperatur (0.4) für strukturierte aber nuancierte Analyse.
+
+    Agent 3 — Reporter (Forensic Writer):
+        Erhält Triage + DFIR-Analyse und erstellt den gerichtsverwertbaren
+        Markdown-Report mit Executive Summary, Befunden und Empfehlungen.
+        Mittlere Temperatur (0.4) für professionellen, faktischen Schreibstil.
+
+Analyse-Modi:
+    - 'standard':       Opfer-Perspektive (Standard; angegriffenes System)
+    - 'attacker_infra': Täter-Perspektive (Server/Infrastruktur des Angreifers;
+                        andere System-Prompts, andere Event-Filterung)
+
+Streaming:
+    run() ist ein Generator der SSE-kompatible Dicts yieldet — jeder Token
+    wird sofort an das Frontend weitergeleitet ohne auf den vollständigen
+    LLM-Output zu warten. Das Frontend empfängt die Tokens über den
+    /api/analyze/stream-Endpunkt.
+
+Verwendung:
+    orchestrator = MultiAgentOrchestrator(model='llama3.1', analysis_mode='standard')
+    for event in orchestrator.run(anomalies, summary, indicators):
+        if event.get('status') == 'complete':
+            final_report = event['final_report']
+        elif event.get('status') == 'streaming':
+            print(event['token'], end='')  # Echtzeit-Output
+
+Abhängigkeiten:
+    - .ollama_client (OllamaClient — Streaming-API-Aufrufe)
+    - .prompts (PromptManager — Täterinfrastruktur-Report-Prompt)
+
+Kontext: LFX Forensic Analysis System — LLM-Integrations-Schicht
+================================================================================
 """
 
 import json
@@ -19,7 +55,11 @@ from .prompts import PromptManager
 
 logger = logging.getLogger(__name__)
 
-# ── System-Prompts (Charakter/Rolle pro Agent) ──────────────────────────────
+# ── System-Prompts: Standard-Modus (Opfer-Perspektive) ───────────────────────
+# Diese drei Prompts definieren Charakter und Aufgabe je eines Agenten.
+# Sie werden als "system"-Feld im Ollama-API-Aufruf übergeben.
+# Jeder Prompt enthält strikt definierte Output-Formate damit der nächste
+# Agent den Output des vorherigen zuverlässig parsen kann.
 
 TRIAGE_SYSTEM_PROMPT = """Du bist ein SOC Level 1 Analyst (Security Operations Center) in einem Triage-Team.
 
@@ -91,7 +131,12 @@ DEIN OUTPUT-FORMAT (strikt einhalten):
 - **Geschaetzter Impact:** [Beschreibung]"""
 
 
-# ── Täterinfrastruktur-Systemprompte ────────────────────────────────────────
+# ── System-Prompts: Täterinfrastruktur-Modus ─────────────────────────────────
+# Alternative Prompts für analysis_mode='attacker_infra'.
+# Wechselt die Analyse-Perspektive: Nicht "Was wurde auf dem Opfer gemacht?"
+# sondern "Was hat der Angreifer von seinem eigenen Server aus getan?"
+# Verwendet andere Klassifizierungs-Kategorien (C2_AKTIV, STAGING etc.)
+# und fokussiert auf MITRE Resource Development Taktiken.
 
 ATTACKER_INFRA_TRIAGE_PROMPT = """Du bist ein Threat Intelligence Analyst der Taeterinfrastruktur analysiert.
 
@@ -276,24 +321,39 @@ DEIN OUTPUT-FORMAT (strikt einhalten):
 Analysemethode: Multi-Agent KI-Analyse (Triage → DFIR → Report)*"""
 
 
-# ── Orchestrator ─────────────────────────────────────────────────────────────
+# ── Orchestrator ──────────────────────────────────────────────────────────────
 
 class MultiAgentOrchestrator:
     """
-    Orchestriert 3 spezialisierte LLM-Agenten sequentiell.
+    Orchestriert 3 spezialisierte LLM-Agenten für forensische Analyse.
 
-    Jeder Agent:
-    - Hat einen eigenen Systemprompt (Charakter/Rolle)
-    - Bekommt den Output des vorherigen Agenten als Input
-    - Gibt sein Ergebnis via Generator (SSE-kompatibel) zurueck
+    Implementiert eine sequentielle Pipeline: Jeder Agent erhält den Output
+    des vorherigen als Teil seines User-Prompts. Das ermöglicht progressive
+    Verfeinerung der Analyse — vom groben Triage-Ergebnis über die technische
+    DFIR-Analyse bis zum finalen Report.
 
-    Analyse-Modi:
-    - 'standard'       → Opfer-Perspektive (angegriffenes System)
-    - 'attacker_infra' → Taeter-Perspektive (Server des Angreifers)
+    Jeder Agent nutzt Streaming (generate_stream) und yieldet Tokens sofort,
+    sodass das Frontend die Ausgabe in Echtzeit über SSE empfangen kann.
+
+    Analyse-Modi (bei Initialisierung festgelegt):
+        'standard':       Standard-Forensik-Agenten (SOC Analyst → DFIR → Reporter)
+        'attacker_infra': Täterinfrastruktur-Agenten (Infra-Triage → TI-Analyst → Infra-Reporter)
+
+    Timeout:
+        900 Sekunden (15 Minuten) pro Agent. Forensische LLM-Analysen können bei
+        großen Timelines erheblich länger dauern als normale LLM-Anfragen.
+
+    Beispiel:
+        orc = MultiAgentOrchestrator(model='llama3.1', analysis_mode='standard')
+        for event in orc.run(anomalies, summary={'input_file': 'disk.dd'}, indicators={}):
+            if event['status'] == 'streaming':
+                sys.stdout.write(event['token'])
+            elif event['status'] == 'complete':
+                report = event['final_report']
     """
 
     def __init__(self, model: str = None, analysis_mode: str = 'standard'):
-        # Hoeherer Timeout pro Agent (15 min statt 10 min) — jeder Agent kann lange laufen
+        # Höherer Timeout pro Agent (15 min statt 10 min) — jeder Agent kann lange laufen
         self.client = OllamaClient(model=model, timeout=900)
         self.analysis_mode = analysis_mode
         self.prompt_manager = PromptManager()
@@ -302,8 +362,16 @@ class MultiAgentOrchestrator:
             f"(Model: {self.client.model}, Modus: {analysis_mode}, Timeout: 900s)"
         )
 
+    # ── System-Prompt-Auswahl ─────────────────────────────────────────────────
+
     def _get_system_prompts(self):
-        """Gibt die passenden System-Prompts je nach Analyse-Modus zurück."""
+        """
+        Gibt das passende System-Prompt-Tripel je nach Analyse-Modus zurück.
+
+        Returns:
+            Tuple (triage_sys, analyst_sys, reporter_sys) mit den System-Prompts
+            für die drei Agenten im gewählten Analyse-Modus.
+        """
         if self.analysis_mode == 'attacker_infra':
             return (
                 ATTACKER_INFRA_TRIAGE_PROMPT,
@@ -312,9 +380,24 @@ class MultiAgentOrchestrator:
             )
         return (TRIAGE_SYSTEM_PROMPT, ANALYST_SYSTEM_PROMPT, REPORTER_SYSTEM_PROMPT)
 
+    # ── Prompt-Builder ────────────────────────────────────────────────────────
+
     @staticmethod
     def _compact_anomaly(a: dict) -> str:
-        """Komprimiert eine Anomalie zu einer Textzeile fuer den Triage-Agent."""
+        """
+        Komprimiert eine Anomalie-Dict zu einer kompakten Textzeile.
+
+        Reduziert den Kontext-Verbrauch im Triage-Prompt indem die relevantesten
+        Felder jeder Anomalie in einer einzigen Zeile zusammengefasst werden.
+        Details wie Metadaten werden auf die wichtigsten Attribute (host, ip, user)
+        reduziert. MITRE-Techniken werden als IDs angehängt.
+
+        Args:
+            a: Anomalie-Dict aus anomalies_detected.json
+
+        Returns:
+            Einzeilige Textzusammenfassung der Anomalie
+        """
         meta = a.get('metadata', {}) if isinstance(a.get('metadata'), dict) else {}
         ts = a.get('timestamp', '?')
         etype = a.get('event_type', meta.get('event_type', '?'))
@@ -334,7 +417,7 @@ class MultiAgentOrchestrator:
             parts.append(f"user={user}")
         parts.append(desc)
 
-        # MITRE-Techniken falls vorhanden
+        # MITRE-Techniken falls vorhanden (max. 3 IDs)
         mitre = a.get('mitre_techniques', [])
         if mitre:
             mitre_str = ', '.join(t['id'] for t in mitre[:3])
@@ -343,7 +426,19 @@ class MultiAgentOrchestrator:
         return " | ".join(parts)
 
     def _build_triage_prompt(self, anomalies: list, summary: dict) -> str:
-        """Baut den User-Prompt fuer den Triage-Agent."""
+        """
+        Baut den User-Prompt für Agent 1 (Triage).
+
+        Enthält eine optionale Analysezusammenfassung (Gesamtstatistik) gefolgt
+        von komprimierten Anomalie-Zeilen für jede zu klassifizierende Anomalie.
+
+        Args:
+            anomalies: Liste der Anomalie-Dicts (aus anomalies_detected.json)
+            summary:   Analyse-Zusammenfassung aus analysis_summary.json
+
+        Returns:
+            Vollständiger User-Prompt-Text für den Triage-Agenten
+        """
         anomaly_lines = [self._compact_anomaly(a) for a in anomalies]
         anomaly_text = "\n".join(anomaly_lines)
 
@@ -363,7 +458,20 @@ class MultiAgentOrchestrator:
         )
 
     def _build_analyst_prompt(self, triage_result: str, anomalies: list, indicators: dict) -> str:
-        """Baut den User-Prompt fuer den Analyst-Agent."""
+        """
+        Baut den User-Prompt für Agent 2 (Senior DFIR Analyst).
+
+        Enthält das vollständige Triage-Ergebnis aus Agent 1 sowie
+        extrahierte Indikatoren (IPs, User, Prozesse) für die Korrelationsanalyse.
+
+        Args:
+            triage_result: Vollständiger Markdown-Output von Agent 1 (Triage)
+            anomalies:     Originale Anomalie-Liste (nur für Zählung/Referenz)
+            indicators:    Dict mit IOC-Kategorien aus dem AI-Preprocessor
+
+        Returns:
+            Vollständiger User-Prompt-Text für den DFIR-Analyst-Agenten
+        """
         ind_text = ""
         if indicators:
             ind_parts = []
@@ -383,7 +491,20 @@ class MultiAgentOrchestrator:
         )
 
     def _build_reporter_prompt(self, triage_result: str, analyst_result: str, summary: dict) -> str:
-        """Baut den User-Prompt fuer den Reporter-Agent."""
+        """
+        Baut den User-Prompt für Agent 3 (Reporter).
+
+        Kombiniert Triage- und DFIR-Analyst-Ergebnisse mit Metadaten der
+        analysierten Datei für den finalen Report.
+
+        Args:
+            triage_result:  Vollständiger Markdown-Output von Agent 1 (Triage)
+            analyst_result: Vollständiger Markdown-Output von Agent 2 (DFIR Analyst)
+            summary:        Analyse-Zusammenfassung mit Datei-Metadaten
+
+        Returns:
+            Vollständiger User-Prompt-Text für den Reporter-Agenten
+        """
         summary_text = ""
         if summary:
             summary_text = (
@@ -401,17 +522,42 @@ class MultiAgentOrchestrator:
             "Erstelle nun den gerichtsverwertbaren forensischen Bericht."
         )
 
+    # ── Haupt-Orchestrierung ──────────────────────────────────────────────────
+
     def run(self, anomalies: list, summary: dict = None,
             indicators: dict = None) -> Generator[Dict[str, Any], None, None]:
         """
-        Fuehrt die Multi-Agent-Analyse sequentiell durch.
+        Führt die sequentielle Multi-Agent-Analyse durch.
 
-        Modus wird bei Initialisierung gesetzt:
-          MultiAgentOrchestrator(analysis_mode='attacker_infra')
+        Jeder der drei Agenten läuft nacheinander: Das Ergebnis von Agent N
+        wird als Input für Agent N+1 verwendet. Alle Agents streamen ihre
+        Ausgabe Token-für-Token via Generator.
 
-        Yields SSE-kompatible Event-Dicts:
-          {"agent": "triage|analyst|reporter", "status": "running|done|error", "result": "..."}
-          {"status": "complete", "final_report": "..."}
+        Im Täterinfrastruktur-Modus ('attacker_infra') werden vor der Übergabe
+        an die Agenten nur Infrastruktur-relevante Event-Typen (c2_beacon,
+        ssh_event, vpn_connection etc.) herausgefiltert um den Kontext
+        zu fokussieren.
+
+        Bei einem Fehler in einem Agenten wird ein Error-Event geyieldet
+        und die Pipeline abgebrochen (return statt Exception um den Generator
+        sauber zu beenden).
+
+        Args:
+            anomalies:   Liste der Anomalie-Dicts aus anomalies_detected.json
+            summary:     Analyse-Zusammenfassung aus analysis_summary.json
+                         (optional, wird für Metadaten in Prompts verwendet)
+            indicators:  Dict mit extrahierten IOC-Kategorien aus dem
+                         AI-Preprocessor (optional, für Agent 2)
+
+        Yields:
+            Dicts mit SSE-kompatiblem Format:
+            - {"agent": "triage", "status": "running", "mode": "standard"}
+            - {"agent": "triage", "status": "streaming", "token": "..."}
+            - {"agent": "triage", "status": "done", "result": "..."}
+            - {"agent": "analyst", ...} (analog)
+            - {"agent": "reporter", ...} (analog)
+            - {"status": "complete", "final_report": "...", "mode": "..."}
+            - {"agent": "...", "status": "error", "error": "..."} (bei Fehler)
         """
         triage_sys, analyst_sys, reporter_sys = self._get_system_prompts()
         mode_label = "Taetersinfrastruktur-Modus" if self.analysis_mode == 'attacker_infra' else "Standard-Modus"
@@ -420,7 +566,9 @@ class MultiAgentOrchestrator:
         logger.info(f"MULTI-AGENT-ANALYSE GESTARTET: {len(anomalies)} Anomalien [{mode_label}]")
         logger.info(f"{'=' * 70}")
 
-        # Im Taetersinfrastruktur-Modus: Nur Infra-relevante Events uebergeben
+        # Im Täterinfrastruktur-Modus: Nur Infra-relevante Events übergeben.
+        # Verhindert dass normale Dateisystem-Events den Infra-Kontext verwässern.
+        # Fallback auf alle Anomalien wenn keine Infra-Events gefunden werden.
         if self.analysis_mode == 'attacker_infra':
             infra_event_types = {
                 'c2_beacon', 'c2_tool', 'vpn_connection', 'vpn_disconnect',
@@ -441,17 +589,21 @@ class MultiAgentOrchestrator:
         else:
             relevant_anomalies = anomalies
 
-        # ── Agent 1: Triage ────────────────────────────────────────────────
+        # ── Agent 1: Triage ────────────────────────────────────────────────────
         yield {"agent": "triage", "status": "running", "mode": self.analysis_mode}
         try:
             triage_prompt = self._build_triage_prompt(relevant_anomalies, summary)
             logger.info(f"[Triage] Prompt: {len(triage_prompt)} Zeichen")
-            triage_result = self.client.generate(
+            triage_tokens = []
+            for token in self.client.generate_stream(
                 system_prompt=triage_sys,
                 user_prompt=triage_prompt,
-                temperature=0.3,
+                temperature=0.3,   # Niedrig: konsistente, regelbasierte Klassifizierung
                 max_tokens=2000,
-            )
+            ):
+                triage_tokens.append(token)
+                yield {"agent": "triage", "status": "streaming", "token": token}
+            triage_result = ''.join(triage_tokens)
             yield {"agent": "triage", "status": "done", "result": triage_result}
             logger.info(f"[Triage] Abgeschlossen ({len(triage_result)} Zeichen)")
         except Exception as e:
@@ -459,17 +611,21 @@ class MultiAgentOrchestrator:
             yield {"agent": "triage", "status": "error", "error": str(e)}
             return
 
-        # ── Agent 2: Analyst ───────────────────────────────────────────────
+        # ── Agent 2: Analyst ───────────────────────────────────────────────────
         yield {"agent": "analyst", "status": "running", "mode": self.analysis_mode}
         try:
             analyst_prompt = self._build_analyst_prompt(triage_result, relevant_anomalies, indicators)
             logger.info(f"[Analyst] Prompt: {len(analyst_prompt)} Zeichen")
-            analyst_result = self.client.generate(
+            analyst_tokens = []
+            for token in self.client.generate_stream(
                 system_prompt=analyst_sys,
                 user_prompt=analyst_prompt,
-                temperature=0.4,
+                temperature=0.4,   # Mittel: strukturierte aber nuancierte DFIR-Analyse
                 max_tokens=3000,
-            )
+            ):
+                analyst_tokens.append(token)
+                yield {"agent": "analyst", "status": "streaming", "token": token}
+            analyst_result = ''.join(analyst_tokens)
             yield {"agent": "analyst", "status": "done", "result": analyst_result}
             logger.info(f"[Analyst] Abgeschlossen ({len(analyst_result)} Zeichen)")
         except Exception as e:
@@ -477,9 +633,10 @@ class MultiAgentOrchestrator:
             yield {"agent": "analyst", "status": "error", "error": str(e)}
             return
 
-        # ── Agent 3: Reporter ──────────────────────────────────────────────
+        # ── Agent 3: Reporter ──────────────────────────────────────────────────
         yield {"agent": "reporter", "status": "running", "mode": self.analysis_mode}
         try:
+            # Im Täterinfrastruktur-Modus: Spezialisierten Infra-Report-Prompt verwenden
             if self.analysis_mode == 'attacker_infra':
                 reporter_prompt = self.prompt_manager.get_attacker_infra_report_prompt(
                     triage_result, analyst_result, summary
@@ -488,12 +645,16 @@ class MultiAgentOrchestrator:
                 reporter_prompt = self._build_reporter_prompt(triage_result, analyst_result, summary)
 
             logger.info(f"[Reporter] Prompt: {len(reporter_prompt)} Zeichen")
-            reporter_result = self.client.generate(
+            reporter_tokens = []
+            for token in self.client.generate_stream(
                 system_prompt=reporter_sys,
                 user_prompt=reporter_prompt,
-                temperature=0.4,
-                max_tokens=4000,
-            )
+                temperature=0.4,   # Mittel: professioneller, faktischer Schreibstil
+                max_tokens=4000,   # Größeres Limit: Reports sind länger als Analysen
+            ):
+                reporter_tokens.append(token)
+                yield {"agent": "reporter", "status": "streaming", "token": token}
+            reporter_result = ''.join(reporter_tokens)
             yield {"agent": "reporter", "status": "done", "result": reporter_result}
             logger.info(f"[Reporter] Abgeschlossen ({len(reporter_result)} Zeichen)")
         except Exception as e:
@@ -501,7 +662,9 @@ class MultiAgentOrchestrator:
             yield {"agent": "reporter", "status": "error", "error": str(e)}
             return
 
-        # ── Fertig ─────────────────────────────────────────────────────────
+        # ── Pipeline abgeschlossen ─────────────────────────────────────────────
+        # final_report ist der vollständige Markdown-Output des Reporter-Agenten.
+        # Er wird in pipeline.py als report.md gespeichert.
         yield {"status": "complete", "final_report": reporter_result, "mode": self.analysis_mode}
         logger.info(f"{'=' * 70}")
         logger.info(f"MULTI-AGENT-ANALYSE ABGESCHLOSSEN [{mode_label}]")

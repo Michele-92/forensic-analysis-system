@@ -1,28 +1,70 @@
+/**
+ * ============================================================================
+ * OVERVIEW PANEL — Executive Summary des Forensik-Reports
+ * ============================================================================
+ * Hauptansicht nach Abschluss einer Analyse. Zeigt alle wichtigen Kennzahlen
+ * auf einen Blick: Gesamtrisiko, erkannte Anomalien, IOCs und Zeitstempel.
+ *
+ * Enthaltene Sektionen (von oben nach unten):
+ *   - Top Stats:          4 Kennzahl-Karten (Events, Anomalien, IOCs, Zeitstempel)
+ *   - Risk Overview:      Gesamtrisiko-Badge + Dateiinfo + Export-Buttons
+ *   - Evidence Integrity: Hash-Verifizierung der Beweis-Datei (Chain of Custody)
+ *   - System Profile:     Profil des analysierten Systems (optional, aus FA-22)
+ *   - Key Findings:       Karten der Top-6 Anomalie-Befunde
+ *   - IOC List:           Indicators of Compromise mit Threat-Intel-Lookup
+ *
+ * Modals (werden über lokalen State gesteuert):
+ *   - LLMReportView:      Markdown-Report des Backends + optionaler Ollama-Report
+ *   - PdfExportModal:     Standard-PDF-Export mit Gutachter-Angaben
+ *   - FullReportModal:    Vollständiger Report inkl. Multi-Agent KI-Analyse
+ *
+ * Props: keine — liest `activeJob` und `getCaseForJob` aus AppContext
+ *
+ * Abhängigkeiten:
+ *   AppContext, PdfExportModal, FullReportModal, LLMReportView,
+ *   FindingsCards, IOCList, EvidenceIntegrity, SystemProfileCard,
+ *   RiskBadge, formatters, lucide-react
+ *
+ * @component
+ */
 import React, { useState } from 'react'
 import { useApp } from '../../context/AppContext'
-import { exportPdf } from '../../api/backend'
+import PdfExportModal from '../PdfExportModal'
+import FullReportModal from '../FullReportModal'
 import LLMReportView from './LLMReportView'
 import FindingsCards from './FindingsCards'
 import IOCList from './IOCList'
 import EvidenceIntegrity from './EvidenceIntegrity'
+import SystemProfileCard from './SystemProfileCard'
 import RiskBadge from '../RiskBadge'
 import { formatTimestamp } from '../../utils/formatters'
-import { FileText, AlertTriangle, Activity, Clock, Download, Loader2 } from 'lucide-react'
+import { FileText, AlertTriangle, Activity, Clock, Download, FileDown } from 'lucide-react'
 
+// ── Hauptkomponente ───────────────────────────────────────────────────────────
+
+/**
+ * Executive-Summary-Ansicht für den aktiven Analyse-Job.
+ * Rendert nichts, solange kein aktiver Job mit Daten vorhanden ist.
+ */
 export default function OverviewPanel() {
   const { activeJob, getCaseForJob } = useApp()
   const [reportOpen, setReportOpen] = useState(false)
-  const [pdfLoading, setPdfLoading] = useState(false)
-  const [pdfError, setPdfError] = useState(null)
+  const [pdfModalOpen, setPdfModalOpen] = useState(false)
+  const [fullReportOpen, setFullReportOpen] = useState(false)
 
   const data = activeJob?.data
   if (!data) return null
 
-  const summary = data.summary || {}
-  const anomalies = data.anomalies || []
-  const preprocessed = data.preprocessed || {}
-  const indicators = preprocessed.indicators || {}
+  // Optionale Multi-Agent-Analyse (aus IntelligencePanel befüllt)
+  const agentAnalysis = data.agentAnalysis || null
 
+  const summary      = data.summary      || {}
+  const anomalies    = data.anomalies    || []
+  const preprocessed = data.preprocessed || {}
+  const indicators   = preprocessed.indicators || {}
+
+  // Gesamtrisiko aus dem höchsten Anomalie-Score ableiten:
+  // >= 0.8 → critical, >= 0.6 → high, >= 0.4 → medium, sonst low / info
   const overallRisk = anomalies.length > 0
     ? (Math.max(...anomalies.map(a => a.anomaly_score || 0)) >= 0.8 ? 'critical'
       : Math.max(...anomalies.map(a => a.anomaly_score || 0)) >= 0.6 ? 'high'
@@ -75,30 +117,25 @@ export default function OverviewPanel() {
           </div>
         </div>
 
+        {/* Export- und Report-Buttons */}
         <div className="flex items-center gap-2">
           <button
-            onClick={async () => {
-              setPdfLoading(true)
-              setPdfError(null)
-              try {
-                const jobCase = getCaseForJob(activeJob.job_id)
-                const caseInfo = jobCase ? {
-                  case_name: jobCase.case_name,
-                  case_number: jobCase.case_number,
-                  analyst: jobCase.analyst,
-                } : {}
-                await exportPdf(activeJob.job_id, caseInfo)
-              } catch (err) {
-                setPdfError(err.message)
-              } finally {
-                setPdfLoading(false)
-              }
-            }}
-            disabled={pdfLoading}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-accent-purple/10 text-accent-purple hover:bg-accent-purple/20 transition-all text-sm font-medium disabled:opacity-50"
+            onClick={() => setPdfModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-accent-purple/10 text-accent-purple hover:bg-accent-purple/20 transition-all text-sm font-medium"
           >
-            {pdfLoading ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+            <Download size={16} />
             PDF Export
+          </button>
+          <button
+            onClick={() => setFullReportOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-accent-cyan/10 text-accent-cyan hover:bg-accent-cyan/20 transition-all text-sm font-medium"
+          >
+            <FileDown size={16} />
+            Vollständiger Report
+            {/* Grüner Indikator-Punkt wenn Multi-Agent-Analyse vorhanden */}
+            {agentAnalysis && (
+              <span className="w-1.5 h-1.5 rounded-full bg-accent-green" />
+            )}
           </button>
           <button
             onClick={() => setReportOpen(true)}
@@ -109,14 +146,12 @@ export default function OverviewPanel() {
           </button>
         </div>
       </div>
-      {pdfError && (
-        <div className="glass-card border border-risk-critical/20 text-risk-critical text-xs py-2">
-          PDF-Fehler: {pdfError}
-        </div>
-      )}
 
       {/* Evidence Integrity */}
       <EvidenceIntegrity fileHash={activeJob.file_hash} jobId={activeJob.job_id} />
+
+      {/* System-Profil (FA-22) */}
+      {data.systemProfile && <SystemProfileCard profile={data.systemProfile} />}
 
       {/* Key Findings */}
       {anomalies.length > 0 && (
@@ -146,10 +181,40 @@ export default function OverviewPanel() {
           onClose={() => setReportOpen(false)}
         />
       )}
+
+      {/* PDF Export Modal */}
+      {pdfModalOpen && (
+        <PdfExportModal
+          jobCase={getCaseForJob(activeJob.job_id)}
+          jobId={activeJob.job_id}
+          onClose={() => setPdfModalOpen(false)}
+        />
+      )}
+
+      {/* Vollständiger Report Modal */}
+      {fullReportOpen && (
+        <FullReportModal
+          jobCase={getCaseForJob(activeJob.job_id)}
+          jobId={activeJob.job_id}
+          agentAnalysis={agentAnalysis}
+          onClose={() => setFullReportOpen(false)}
+        />
+      )}
     </div>
   )
 }
 
+// ── Hilfskomponenten ──────────────────────────────────────────────────────────
+
+/**
+ * Einzelne Statistik-Karte in der Top-Stats-Leiste.
+ * Zeigt ein Icon, eine Beschriftung und eine Kennzahl.
+ *
+ * @param {React.ReactNode} icon  - Lucide-Icon (bereits als JSX übergeben)
+ * @param {string}          label - Beschriftung unter der Kennzahl (z.B. "Total Events")
+ * @param {string|number}   value - Anzuzeigende Kennzahl
+ * @param {boolean}         [small] - Kleinere Monospace-Schrift für lange Werte (z.B. Zeitstempel)
+ */
 function StatCard({ icon, label, value, small }) {
   return (
     <div className="glass-card flex items-center gap-3">

@@ -1,22 +1,51 @@
 """
-MITRE ATT&CK Auto-Mapper.
+================================================================================
+MITRE ATT&CK MAPPER — Event-Typ zu Technik-ID Zuordnung
+================================================================================
+Ordnet erkannte forensische Event-Typen den entsprechenden MITRE ATT&CK
+Enterprise Techniken (Version 15, Stand 2024) zu. Unterstützt beide
+Analyse-Perspektiven:
 
-Statische Zuordnung von Event-Typen zu MITRE ATT&CK Techniken.
-Basiert auf MITRE ATT&CK Enterprise v15 (2024).
-Kein externer API-Aufruf erforderlich — komplett offline (air-gapped).
+  - Täterinfrastruktur-Modus ('attacker_infra'):
+      Fokus auf Angreifer-Server — C2-Kommunikation, Tool-Staging,
+      Lateral Movement, Ressourcen-Entwicklung.
 
-Besonderheiten:
-─────────────────────────────────────────────────────────────
-• Schwerpunkt: Täterinfrastruktur-Analyse (Angreifer-Perspektive)
-  — C2-Kommunikation, Staging, Lateral Movement, Tool-Nutzung
-  — Passend für forensische Untersuchung von Angreifer-Servern
-• Zusätzlich: Opfer-Perspektive (angegriffene Linux-Server)
-  — Initial Access, Privilege Escalation, Defense Evasion, Exfiltration
-• Mapping-Kategorien:
-  HIGH     → Score 7–10 (kritische Indikatoren, sofort relevant)
-  MEDIUM   → Score 4–6  (auffällig, im Kontext bewerten)
-  LOW      → Score 1–3  (Hintergrundrauschen, selten relevant)
-  INFRA    → Täterinfrastruktur-spezifisch
+  - Opfer-Server-Modus ('victim_server'):
+      Fokus auf angegriffene Systeme — Initial Access, Privilege Escalation,
+      Defense Evasion, Exfiltration.
+
+  - Beide Modi ('both', Standard):
+      Alle verfügbaren Taktiken werden berücksichtigt.
+
+Aufgaben:
+    - Statisches Mapping: event_type → MITRE Technique-ID + Name + Taktik
+    - Timeline-Anreicherung: Fügt jedem Event mitre_techniques + mitre_tactics hinzu
+    - Scoring: Gewichtete Zusammenfassungen (Taktik-Häufigkeit, Technik-Häufigkeit)
+    - Täterinfrastruktur-Analyse: Kategorisiert C2, Staging, Lateral, Exfil
+    - Kill-Chain-Coverage: Mappt erkannte Taktiken auf Lockheed Martin Kill Chain
+
+Verwendung:
+    mapper = MitreMapper(mode='both')
+    enriched = mapper.enrich_timeline(timeline_events)
+    summary  = mapper.get_tactic_summary(enriched)
+    # → {'Defense Evasion': 42, 'Command and Control': 17, ...}
+
+Wichtige Konstanten:
+    MITRE_MAPPING:          Dict[event_type → List[technique_dicts]]
+    ATTACKER_INFRA_TACTICS: Set — Taktiken typisch für Angreifer-Infrastruktur
+    VICTIM_SERVER_TACTICS:  Set — Taktiken typisch für angegriffene Systeme
+
+Scoring-Kategorien (dokumentiert als Kommentare im MITRE_MAPPING):
+    HIGH   (Score 7–10): Kritische Indikatoren, sofortige Relevanz
+    MEDIUM (Score 4–6):  Auffällig, im Kontext zu bewerten
+    LOW    (Score 1–3):  Hintergrundrauschen
+    INFRA:               Täterinfrastruktur-spezifische Einträge
+
+Abhängigkeiten:
+    - Keine externen Pakete (nur Python-stdlib: logging, typing)
+
+Kontext: LFX Forensic Analysis System — Pipeline Stage 8 (MITRE-Mapping),
+         aufgerufen aus backend/pipeline.py nach der Anomalie-Erkennung.
 """
 
 import logging
@@ -25,9 +54,17 @@ from typing import List, Dict, Tuple
 logger = logging.getLogger(__name__)
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Statisches Mapping: event_type → [(technique_id, name, tactic)]
-# ═══════════════════════════════════════════════════════════════════════════════
+# ── Statisches Mapping: event_type → [(technique_id, name, tactic)] ──────────
+#
+# Aufbau eines Eintrags:
+#   'event_type': [
+#       {'id': 'T1234',     'name': 'Technique Name', 'tactic': 'Tactic Name'},
+#       {'id': 'T1234.001', 'name': 'Sub-Technique',  'tactic': 'Tactic Name'},
+#   ]
+#
+# Leere Listen ([]) bedeuten: bekannter Event-Typ, aber kein MITRE-Mapping
+# sinnvoll (Hintergrundrauschen / normaler Betrieb).
+# ─────────────────────────────────────────────────────────────────────────────
 
 MITRE_MAPPING: Dict[str, List[Dict[str, str]]] = {
 
@@ -347,11 +384,50 @@ MITRE_MAPPING: Dict[str, List[Dict[str, str]]] = {
     'process_event': [],
     'log_entry': [],
     'login_event': [],
+
+    # ══════════════════════════════════════════════════════════════════════
+    # ── ERGAENZUNG: Fehlende Techniken fuer >= 80 Gesamt (ATT&CK v15) ────
+    # ══════════════════════════════════════════════════════════════════════
+
+    # Obfuskation / Verschleierung von Dateien und Payloads
+    'obfuscation': [
+        {'id': 'T1027',     'name': 'Obfuscated Files or Information', 'tactic': 'Defense Evasion'},
+        {'id': 'T1027.001', 'name': 'Binary Padding',                  'tactic': 'Defense Evasion'},
+        {'id': 'T1027.004', 'name': 'Compile After Delivery',          'tactic': 'Defense Evasion'},
+    ],
+
+    # Masquerading: Angreifer-Tool tarnt sich als legitimes Programm
+    'masquerading': [
+        {'id': 'T1036',     'name': 'Masquerading',                    'tactic': 'Defense Evasion'},
+        {'id': 'T1036.005', 'name': 'Match Legitimate Name or Location','tactic': 'Defense Evasion'},
+    ],
+
+    # Daten archivieren vor Exfiltration (zip, tar, 7z)
+    'data_archived': [
+        {'id': 'T1560',     'name': 'Archive Collected Data',          'tactic': 'Collection'},
+        {'id': 'T1560.001', 'name': 'Archive via Utility',             'tactic': 'Collection'},
+    ],
+
+    # Daten aus lokalem System sammeln (Clipboard, Screenshots, Dateien)
+    'data_collection': [
+        {'id': 'T1005',     'name': 'Data from Local System',          'tactic': 'Collection'},
+        {'id': 'T1074',     'name': 'Data Staged',                     'tactic': 'Collection'},
+        {'id': 'T1074.001', 'name': 'Local Data Staging',              'tactic': 'Collection'},
+    ],
+
+    # Supply-Chain / externe Ressourcen missbrauchen
+    'supply_chain': [
+        {'id': 'T1195',     'name': 'Supply Chain Compromise',         'tactic': 'Initial Access'},
+        {'id': 'T1195.002', 'name': 'Compromise Software Supply Chain','tactic': 'Initial Access'},
+    ],
 }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Taktik-Gruppen für Täterinfrastruktur-Analyse
+# ── Taktik-Gruppen für Analyse-Modus-Filter ───────────────────────────────────
+#
+# Diese Sets werden in MitreMapper.map_event() verwendet, um Techniken nach
+# Analyse-Perspektive zu filtern. Ein Event kann in beiden Sets relevante
+# Taktiken haben — der Modus entscheidet, welche zurückgegeben werden.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Taktiken die typisch für Täterinfrastruktur sind
@@ -375,18 +451,22 @@ VICTIM_SERVER_TACTICS = {
 }
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Mapper-Klasse
-# ═══════════════════════════════════════════════════════════════════════════════
+# ── Mapper-Klasse ─────────────────────────────────────────────────────────────
 
 class MitreMapper:
     """
-    Ordnet forensische Events MITRE ATT&CK Techniken zu.
+    Ordnet forensische Events MITRE ATT&CK Techniken zu und reichert die
+    Timeline mit strukturierten Taktik- und Technik-Informationen an.
 
-    Unterstützt zwei Analyse-Modi:
-    - 'attacker_infra' → fokussiert auf Täterinfrastruktur-Taktiken
-    - 'victim_server'  → fokussiert auf Angriffs-Empfänger-Taktiken
-    - 'both'           → alle Taktiken (Standard)
+    Unterstützt drei Analyse-Modi, die über den Konstruktor gesetzt werden:
+      - 'attacker_infra' : Nur Techniken aus ATTACKER_INFRA_TACTICS zurückgeben
+      - 'victim_server'  : Nur Techniken aus VICTIM_SERVER_TACTICS zurückgeben
+      - 'both' (Standard): Alle Techniken zurückgeben, kein Filter
+
+    Typischer Aufruf-Ablauf in der Pipeline:
+        1. mapper.enrich_timeline(timeline)   → Timeline mit Technik-Feldern
+        2. mapper.get_tactic_summary(events)  → Häufigkeits-Übersicht pro Taktik
+        3. mapper.get_kill_chain_coverage(events) → Kill-Chain Visualisierungs-Daten
     """
 
     def __init__(self, mode: str = 'both'):
@@ -397,9 +477,18 @@ class MitreMapper:
         """
         Gibt MITRE-Techniken für ein einzelnes Event zurück.
         Filtert nach Analyse-Modus wenn gesetzt.
+
+        Args:
+            event: Normalisiertes Event-Dict, muss 'event_type' enthalten.
+                   Fallback: event['metadata']['event_type'] wird geprüft.
+
+        Returns:
+            Liste von Technik-Dicts mit Feldern 'id', 'name', 'tactic'.
+            Leere Liste wenn kein Mapping oder event_type 'unknown'.
         """
         event_type = event.get('event_type', '')
         if not event_type or event_type == 'unknown':
+            # Fallback: event_type aus verschachteltem metadata-Feld holen
             meta = event.get('metadata', {})
             if isinstance(meta, dict):
                 event_type = meta.get('event_type', 'unknown')
@@ -420,8 +509,14 @@ class MitreMapper:
 
         Fügt jedem Event folgende Felder hinzu:
         - 'mitre_techniques': Liste der zugeordneten Techniken
-        - 'mitre_tactics':    Deduplizierte Taktiken-Liste
-        - 'is_attacker_infra': True wenn Täterinfrastruktur-Taktik vorhanden
+        - 'mitre_tactics':    Deduplizierte Taktiken-Liste (Reihenfolge erhalten)
+        - 'is_attacker_infra': True wenn mindestens eine Täterinfrastruktur-Taktik vorhanden
+
+        Args:
+            timeline: Liste normalisierter Event-Dicts (wird in-place modifiziert).
+
+        Returns:
+            Dieselbe Timeline-Liste, jetzt mit MITRE-Feldern angereichert.
         """
         mapped_count   = 0
         technique_ids  = set()
@@ -435,7 +530,7 @@ class MitreMapper:
                 mapped_count += 1
                 technique_ids.update(t['id'] for t in techniques)
 
-                # Deduplizierte Taktiken-Liste
+                # Deduplizierte Taktiken-Liste (dict.fromkeys erhält Reihenfolge)
                 tactics = list(dict.fromkeys(t['tactic'] for t in techniques))
                 event['mitre_tactics'] = tactics
 
@@ -455,7 +550,15 @@ class MitreMapper:
         return timeline
 
     def get_tactic_summary(self, events: List[Dict]) -> Dict[str, int]:
-        """Zählt Vorkommnisse pro MITRE-Taktik (sortiert nach Häufigkeit)."""
+        """
+        Zählt Vorkommnisse pro MITRE-Taktik (sortiert nach Häufigkeit, absteigend).
+
+        Args:
+            events: Liste von Events, die bereits durch enrich_timeline() angereichert wurden.
+
+        Returns:
+            Dict {tactic_name: count}, z.B. {'Defense Evasion': 42, 'Execution': 17}.
+        """
         tactic_counts: Dict[str, int] = {}
         for event in events:
             for tech in event.get('mitre_techniques', []):
@@ -464,7 +567,17 @@ class MitreMapper:
         return dict(sorted(tactic_counts.items(), key=lambda x: x[1], reverse=True))
 
     def get_technique_summary(self, events: List[Dict]) -> List[Dict]:
-        """Gibt alle gefundenen Techniken mit Anzahl zurück (sortiert nach Häufigkeit)."""
+        """
+        Gibt alle gefundenen Techniken mit ihrer Auftretenshäufigkeit zurück
+        (sortiert nach Häufigkeit, absteigend).
+
+        Args:
+            events: Liste von Events, die bereits durch enrich_timeline() angereichert wurden.
+
+        Returns:
+            Liste von Dicts mit Feldern 'id', 'name', 'tactic', 'count'.
+            Jede Technik erscheint nur einmal (dedupliziert nach Technik-ID).
+        """
         technique_counts: Dict[str, Dict] = {}
         for event in events:
             for tech in event.get('mitre_techniques', []):
@@ -481,14 +594,20 @@ class MitreMapper:
 
     def get_attacker_infra_summary(self, events: List[Dict]) -> Dict:
         """
-        Erstellt eine Täterinfrastruktur-spezifische Zusammenfassung.
+        Erstellt eine Täterinfrastruktur-spezifische Zusammenfassung der Events.
 
-        Gibt zurück:
-        - c2_indicators:    Events die auf C2-Kommunikation hinweisen
-        - tool_staging:     Events die auf Tool-Vorbereitung hinweisen
-        - lateral_movement: Events die auf Seitwärtsbewegung hinweisen
-        - exfiltration:     Events die auf Daten-Diebstahl hinweisen
-        - tactic_coverage:  Welche Täterinfrastruktur-Taktiken erkannt
+        Kategorisiert Events in vier operative Aktivitätsbereiche:
+          - c2_indicators:    C2-Kommunikation (Beaconing, Tunnel, VPN)
+          - tool_staging:     Werkzeug-Vorbereitung (Downloads, Tool-Installationen)
+          - lateral_movement: Seitwärtsbewegung im Netzwerk (SSH, Auth-Erfolge)
+          - exfiltration:     Daten-Diebstahl (Exfiltrations-Events, Downloads)
+
+        Args:
+            events: Liste normalisierter Events (sollten bereits MITRE-angereichert sein).
+
+        Returns:
+            Dict mit den vier Kategorien-Listen sowie 'tactic_coverage' (Liste
+            aller erkannten MITRE-Taktiken als Set → wird zu List konvertiert).
         """
         summary = {
             'c2_indicators':    [],
@@ -528,6 +647,7 @@ class MitreMapper:
             if et in exfil_event_types:
                 summary['exfiltration'].append(event)
 
+        # Set zu List konvertieren für JSON-Serialisierbarkeit
         summary['tactic_coverage'] = list(summary['tactic_coverage'])
 
         logger.info(
@@ -541,10 +661,21 @@ class MitreMapper:
 
     def get_kill_chain_coverage(self, events: List[Dict]) -> List[Dict]:
         """
-        Gibt die Cyber Kill Chain Coverage zurück.
+        Gibt die Cyber Kill Chain Coverage als strukturierte Liste zurück.
 
-        Mappt MITRE ATT&CK Taktiken auf die Phasen der Lockheed Martin Cyber Kill Chain,
-        die im Datensatz erkannt wurden.
+        Mappt alle 13 MITRE ATT&CK Taktiken auf die entsprechenden Phasen der
+        Lockheed Martin Cyber Kill Chain und markiert, welche im Datensatz
+        tatsächlich erkannt wurden.
+
+        Args:
+            events: Liste von Events, die durch enrich_timeline() angereichert wurden.
+
+        Returns:
+            Liste von Dicts (eine Eintrag pro Taktik) mit:
+              - 'tactic':           MITRE-Taktik-Name (englisch)
+              - 'label_de':         Deutscher Kill-Chain-Phasen-Name
+              - 'detected':         True wenn diese Taktik im Datensatz vorkommt
+              - 'is_infra_tactic':  True wenn Täterinfrastruktur-Taktik
         """
         KILL_CHAIN_MAP = {
             'Reconnaissance':         'Aufklärung',

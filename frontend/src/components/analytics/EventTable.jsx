@@ -1,21 +1,71 @@
+/**
+ * ============================================================================
+ * EVENT TABLE — Paginierte forensische Event-Liste
+ * ============================================================================
+ * Zeigt alle normalisierten Events in einer tabellarischen Ansicht.
+ * Unterstützt:
+ *   - Freitext-Filterung über Beschreibung, Typ, Quelle und Event-ID
+ *   - Spalten-Sortierung (aufsteigend/absteigend) per Klick auf den Header
+ *   - Client-seitige Paginierung mit 25 Events pro Seite
+ *   - Farbkodierter Anomaly-Score pro Zeile (via getScoreColor)
+ *
+ * Props:
+ * @param {Object[]} timeline - Normalisierte Event-Liste (aus DataNormalizer)
+ *
+ * Abhängigkeiten:
+ *   - RiskBadge (Risiko-Label Komponente)
+ *   - utils/formatters (formatTimestamp, formatScore)
+ *   - utils/colors (getScoreColor)
+ *   - lucide-react (ChevronUp, ChevronDown, Search)
+ *
+ * @component
+ */
 import React, { useState, useMemo } from 'react'
 import RiskBadge from '../RiskBadge'
 import { formatTimestamp, formatScore } from '../../utils/formatters'
 import { getScoreColor } from '../../utils/colors'
 import { ChevronUp, ChevronDown, Search } from 'lucide-react'
 
+// ── Konstanten ─────────────────────────────────────────────────────────────────
+
+/** Anzahl der Events pro Seite (fest kodiert) */
 const PAGE_SIZE = 25
 
+// ── Hauptkomponente ────────────────────────────────────────────────────────────
+
+/**
+ * Paginierte Tabelle aller forensischen Events.
+ * Unterstützt Freitext-Filter über alle relevanten Felder und
+ * Spalten-Sort per Klick auf die Tabellen-Header.
+ *
+ * @param {Object[]} timeline - Normalisierte Event-Liste
+ */
 export default function EventTable({ timeline }) {
+  /** Aktuell sortierte Spalte — Standard: Zeitstempel */
   const [sortKey, setSortKey] = useState('timestamp')
+
+  /** Sortierrichtung — true = aufsteigend, false = absteigend */
   const [sortAsc, setSortAsc] = useState(true)
+
+  /** Aktiver Filtertext — wird auf mehrere Felder angewendet */
   const [filter, setFilter] = useState('')
+
+  /** Aktuell angezeigte Seite (0-basiert) */
   const [page, setPage] = useState(0)
 
+  // ── Gefilterte & sortierte Daten ─────────────────────────────────────────
+
+  /**
+   * Kombiniert Filter und Sortierung in einem einzigen useMemo.
+   * Der Filter sucht case-insensitiv in: description, event_type/type,
+   * source und event_id. Die Sortierung behandelt anomaly_score numerisch,
+   * alle anderen Spalten lexikografisch via localeCompare.
+   */
   const filtered = useMemo(() => {
     if (!timeline?.length) return []
     let data = [...timeline]
 
+    // Freitext-Filter über die vier wichtigsten Felder
     if (filter) {
       const q = filter.toLowerCase()
       data = data.filter(e =>
@@ -26,6 +76,7 @@ export default function EventTable({ timeline }) {
       )
     }
 
+    // Spalten-Sortierung — anomaly_score numerisch, Rest lexikografisch
     data.sort((a, b) => {
       let va = a[sortKey], vb = b[sortKey]
       if (sortKey === 'anomaly_score') {
@@ -41,20 +92,42 @@ export default function EventTable({ timeline }) {
     return data
   }, [timeline, filter, sortKey, sortAsc])
 
+  /** Gesamtzahl der Seiten basierend auf gefilterten Daten */
   const pageCount = Math.ceil(filtered.length / PAGE_SIZE)
+
+  /** Events der aktuellen Seite */
   const pageData = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
 
+  // ── Handler ───────────────────────────────────────────────────────────────
+
+  /**
+   * Wechselt die Sortierrichtung bei erneutem Klick auf dieselbe Spalte.
+   * Bei einer neuen Spalte wird aufsteigend gestartet.
+   *
+   * @param {string} key - Spalten-Schlüssel (z.B. 'timestamp', 'anomaly_score')
+   */
   const toggleSort = (key) => {
     if (sortKey === key) setSortAsc(!sortAsc)
     else { setSortKey(key); setSortAsc(true) }
   }
 
+  // ── Hilfs-Komponente ──────────────────────────────────────────────────────
+
+  /**
+   * Rendert einen Sortier-Pfeil (auf/ab) neben dem aktiven Spalten-Header.
+   * Gibt null zurück, wenn diese Spalte nicht die aktive Sortierspalte ist.
+   *
+   * @param {Object} props
+   * @param {string} props.col - Spalten-Schlüssel
+   */
   const SortIcon = ({ col }) => {
     if (sortKey !== col) return null
     return sortAsc
       ? <ChevronUp size={12} className="inline text-accent-blue" />
       : <ChevronDown size={12} className="inline text-accent-blue" />
   }
+
+  // ── Empty State ───────────────────────────────────────────────────────────
 
   if (!timeline?.length) {
     return (
@@ -64,9 +137,12 @@ export default function EventTable({ timeline }) {
     )
   }
 
+  // ── Render ────────────────────────────────────────────────────────────────
+
   return (
     <div className="glass-card p-0 overflow-hidden">
-      {/* Search */}
+
+      {/* ── Suchfeld ── */}
       <div className="p-3 border-b border-white/[0.04]">
         <div className="relative">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20" />
@@ -80,16 +156,17 @@ export default function EventTable({ timeline }) {
         </div>
       </div>
 
-      {/* Table */}
+      {/* ── Tabelle ── */}
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
             <tr className="border-b border-white/[0.06]">
+              {/* Spalten-Definitionen — key entspricht dem Event-Feldnamen */}
               {[
-                { key: 'timestamp', label: 'Zeitstempel' },
-                { key: 'event_type', label: 'Typ' },
-                { key: 'description', label: 'Beschreibung' },
-                { key: 'source', label: 'Quelle' },
+                { key: 'timestamp',    label: 'Zeitstempel' },
+                { key: 'event_type',   label: 'Typ' },
+                { key: 'description',  label: 'Beschreibung' },
+                { key: 'source',       label: 'Quelle' },
                 { key: 'anomaly_score', label: 'Score' },
               ].map(({ key, label }) => (
                 <th
@@ -105,24 +182,28 @@ export default function EventTable({ timeline }) {
           <tbody>
             {pageData.map((event, i) => {
               const score = event.anomaly_score
+              // Null-Prüfung: Score-Farbe nur berechnen wenn vorhanden
               const scoreColor = score ? getScoreColor(score) : null
               return (
                 <tr
                   key={event.event_id || i}
                   className="border-b border-white/[0.02] hover:bg-white/[0.02] transition-colors"
                 >
+                  {/* Zeitstempel: Monospace-Font für einheitliche Spaltenbreite */}
                   <td className="px-3 py-2 text-xs font-mono text-white/40 whitespace-nowrap">
                     {formatTimestamp(event.timestamp || event.mtime)}
                   </td>
                   <td className="px-3 py-2 text-xs text-white/50">
                     {event.event_type || event.type || '—'}
                   </td>
+                  {/* Beschreibung: max-width + truncate verhindert Layout-Brüche */}
                   <td className="px-3 py-2 text-xs text-white/60 max-w-[400px] truncate">
                     {event.description || event.name || '—'}
                   </td>
                   <td className="px-3 py-2 text-xs text-white/40 font-mono">
                     {event.source || '—'}
                   </td>
+                  {/* Anomaly-Score: farbkodiert via getScoreColor, '—' wenn kein Score */}
                   <td className="px-3 py-2 text-xs font-mono whitespace-nowrap">
                     {score != null ? (
                       <span style={{ color: scoreColor?.hex }}>
@@ -139,7 +220,7 @@ export default function EventTable({ timeline }) {
         </table>
       </div>
 
-      {/* Pagination */}
+      {/* ── Pagination — nur anzeigen wenn mehr als eine Seite ── */}
       {pageCount > 1 && (
         <div className="flex items-center justify-between px-3 py-2 border-t border-white/[0.04]">
           <span className="text-[10px] text-white/25">

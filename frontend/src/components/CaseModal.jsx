@@ -1,3 +1,33 @@
+/**
+ * ============================================================================
+ * CASE MODAL — Dialog zum Erstellen und Bearbeiten forensischer Fallakten
+ * ============================================================================
+ * Modales Formular für zwei Anwendungsfälle:
+ *   - Neu erstellen: Öffnet mit leerem Formular (caseData = null/undefined)
+ *   - Bearbeiten:    Öffnet mit vorausgefülltem Formular (caseData = Objekt)
+ *
+ * Formularfelder:
+ *   - Fallbezeichnung (Pflichtfeld)
+ *   - Aktenzeichen (Pflichtfeld)
+ *   - Beschreibung (optional)
+ *   - Analyst (Name des zuständigen Ermittlers)
+ *   - Qualifikation (z.B. "DFIR Analyst")
+ *   - Auftraggeber (Behörde oder Mandant)
+ *   - Tags (kommasepariert, z.B. "ransomware, insider-threat")
+ *   - Status: offen | in_bearbeitung | abgeschlossen | archiviert
+ *
+ * Props:
+ * @param {Object|null} caseData   - Vorhandene Fall-Daten (null = Neuanlage)
+ * @param {Function}    onSave     - Callback mit Formulardaten bei Bestätigung
+ * @param {Function}    onClose    - Callback zum Schließen des Modals
+ *
+ * Verhalten:
+ *   - Escape-Taste schließt das Modal
+ *   - Tags werden als String eingegeben und als Array gespeichert
+ *   - Doppelter Modus (Erstellen/Bearbeiten) via isEdit-Flag
+ *
+ * @module components/CaseModal
+ */
 import React, { useState, useEffect } from 'react'
 import { X, FolderPlus, Save } from 'lucide-react'
 
@@ -16,6 +46,8 @@ export default function CaseModal({ caseData, onSave, onClose }) {
     case_number: caseData?.case_number || '',
     description: caseData?.description || '',
     analyst: caseData?.analyst || '',
+    qualifikation: caseData?.qualifikation || '',
+    auftraggeber: caseData?.auftraggeber || '',
     tags: caseData?.tags?.join(', ') || '',
     status: caseData?.status || 'offen',
   })
@@ -26,10 +58,10 @@ export default function CaseModal({ caseData, onSave, onClose }) {
     return () => window.removeEventListener('keydown', handler)
   }, [onClose])
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
     if (!form.case_name.trim()) return
-    onSave({
+    await onSave({
       ...form,
       tags: form.tags.split(',').map(t => t.trim()).filter(Boolean),
     })
@@ -80,12 +112,35 @@ export default function CaseModal({ caseData, onSave, onClose }) {
               />
             </div>
             <div>
-              <label className="text-[10px] text-white/30 uppercase tracking-wider block mb-1.5">Analyst</label>
+              <label className="text-[10px] text-white/30 uppercase tracking-wider block mb-1.5">Analyst / Gutachter</label>
               <input
                 type="text"
                 value={form.analyst}
                 onChange={e => setForm(f => ({ ...f, analyst: e.target.value }))}
                 placeholder="Name"
+                className={inputClass}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[10px] text-white/30 uppercase tracking-wider block mb-1.5">Qualifikation</label>
+              <input
+                type="text"
+                value={form.qualifikation}
+                onChange={e => setForm(f => ({ ...f, qualifikation: e.target.value }))}
+                placeholder="z.B. BSc Informatik, Forensik-Analyst"
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <label className="text-[10px] text-white/30 uppercase tracking-wider block mb-1.5">Auftraggeber</label>
+              <input
+                type="text"
+                value={form.auftraggeber}
+                onChange={e => setForm(f => ({ ...f, auftraggeber: e.target.value }))}
+                placeholder="z.B. Staatsanwaltschaft München I"
                 className={inputClass}
               />
             </div>

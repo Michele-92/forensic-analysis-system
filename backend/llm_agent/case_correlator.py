@@ -1,14 +1,42 @@
 """
-Case Correlation Agent.
+================================================================================
+CASE CORRELATION AGENT — Quellenübergreifende Fallkorrelation via LLM
+================================================================================
+Analysiert die Ergebnisse mehrerer abgeschlossener Analyse-Jobs desselben
+forensischen Falls und identifiziert quellenübergreifende Muster, die in
+einzelnen Analysen unsichtbar bleiben.
 
-Aggregiert Daten aus mehreren forensischen Analysen (Jobs) eines Falls
-und identifiziert quellenuebergreifende Korrelationen:
-  - Gemeinsame IPs, Benutzer, Hostnamen
-  - Ueberlappende Zeitfenster
-  - MITRE ATT&CK Angriffsketten ueber mehrere Quellen
-  - Geteilte IOCs
+Aufgaben:
+    - Gemeinsame IOCs: IPs, Benutzer und Hostnamen, die in mehreren
+      Quellen auftauchen (stärkstes Korrelationssignal)
+    - Zeitliche Korrelation: Überlappende Zeitfenster über verschiedene
+      Log- und Image-Quellen deuten auf koordinierte Aktionen hin
+    - MITRE ATT&CK Angriffskette: Kombiniert Techniken aller Quellen zu
+      einer vollständigen Kill-Chain (Initial Access → Exfiltration)
+    - Quellenverbindung: Erklärt, wie die einzelnen Quellen zusammenhängen
+      (z.B. Firewall-Log → Auth-Log → System-Log)
+    - Gesamtrisikobewertung mit Konfidenz und Empfehlungen
 
-Einzelner Agent mit fokussiertem Korrelations-Prompt.
+Streaming:
+    run() ist ein Generator, der SSE-kompatible Dicts yieldet. Das Frontend
+    empfängt die Tokens über den /case-correlate SSE-Endpunkt und zeigt
+    sie in Echtzeit an. Am Ende wird ein 'done'-Event mit dem vollständigen
+    Markdown-Report gesendet.
+
+Verwendung:
+    agent = CaseCorrelationAgent(model='llama3.1')
+    for event in agent.run(job_results_list):
+        if event['type'] == 'token':
+            print(event['content'], end='', flush=True)
+        elif event['type'] == 'done':
+            full_report = event['report']
+
+Abhängigkeiten:
+    - llm_agent.ollama_client (OllamaClient — HTTP-Wrapper für Ollama)
+    - json, logging, datetime, pathlib (stdlib)
+
+Kontext: LFX Forensic Analysis System — Multi-Fall-Korrelations-Schicht
+================================================================================
 """
 
 import json

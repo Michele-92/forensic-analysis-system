@@ -1,25 +1,80 @@
+/**
+ * ============================================================================
+ * UPLOADZONE — Datei-Upload mit Drag & Drop
+ * ============================================================================
+ * Interaktiver Upload-Bereich am unteren Rand der Sidebar. Nimmt forensische
+ * Dateien per Drag & Drop oder Klick entgegen und startet die Backend-Analyse.
+ *
+ * Verhalten je nach Dateianzahl:
+ *   - 1 Datei  → direkter Upload (kein Modal)
+ *   - ≥2 Dateien → öffnet MultiUploadModal zur Konfiguration (Einzeln oder
+ *                  als neuer Fall gruppieren)
+ *
+ * Erlaubte Dateitypen (ALLOWED_EXTENSIONS):
+ *   - Disk-Images: .dd, .raw, .img, .e01, .ewf, .vdi, .vmdk, .vhdx, .qcow2, .aff
+ *   - Logs:        .log, .txt, .syslog, .evtx
+ *   - Archive:     .zip, .tar, .gz
+ *
+ * Props: keine (liest submitFile, createCase, addJobToCase aus useApp Context)
+ *
+ * Abhängigkeiten:
+ *   - AppContext (useApp): submitFile, createCase, addJobToCase
+ *   - MultiUploadModal: Modal für Konfiguration bei mehreren Dateien
+ *
+ * @component
+ */
+
 import React, { useState, useRef } from 'react'
 import { useApp } from '../context/AppContext'
 import MultiUploadModal from './MultiUploadModal'
 import { FileUp, AlertCircle } from 'lucide-react'
 
+// ── Konstanten ─────────────────────────────────────────────────────────────
+
+/**
+ * Erlaubte Dateiendungen für das file-Input-Element.
+ * Verhindert, dass der Browser-Picker unpassende Dateien anzeigt.
+ * Die eigentliche Typ-Erkennung geschieht im Backend (pipeline.py Stage 1).
+ */
 const ALLOWED_EXTENSIONS = [
-  '.dd', '.raw', '.img', '.e01', '.ewf', '.vdi', '.vmdk',
-  '.mem', '.dmp', '.dump',
+  '.dd', '.raw', '.img', '.e01', '.ewf', '.vdi', '.vmdk', '.vhdx', '.qcow2', '.aff',
   '.log', '.txt', '.syslog', '.evtx',
-  '.pcap', '.pcapng',
   '.zip', '.tar', '.gz',
 ]
 
+// ── Hauptkomponente ────────────────────────────────────────────────────────
+
 export default function UploadZone() {
   const { submitFile, createCase, addJobToCase } = useApp()
+
+  // ── Lokaler State ──────────────────────────────────────────────────────
+
+  /** true während ein Drag-Element über der Zone schwebt (visuelles Feedback). */
   const [isDragging, setIsDragging] = useState(false)
+
+  /** Fehlermeldung des letzten Upload-Versuchs, null wenn kein Fehler. */
   const [error, setError] = useState(null)
+
+  /** true während ein oder mehrere Uploads laufen (deaktiviert die Zone). */
   const [uploading, setUploading] = useState(false)
+
+  /**
+   * Puffer für mehrere Dateien: wird gesetzt wenn der Nutzer ≥2 Dateien
+   * wählt, öffnet das MultiUploadModal. Nach Abschluss wieder null.
+   */
   const [pendingFiles, setPendingFiles] = useState(null)
+
+  /** Ref auf das versteckte file-Input-Element für programmatisches Öffnen. */
   const fileRef = useRef(null)
 
-  // Einzelne Datei direkt hochladen (wie bisher)
+  // ── Upload-Logik ───────────────────────────────────────────────────────
+
+  /**
+   * Lädt eine einzelne Datei direkt hoch und startet die Backend-Analyse.
+   * Kein Modal, keine weitere Konfiguration nötig.
+   *
+   * @param {File} file - Die hochzuladende Datei
+   */
   const handleSingleFile = async (file) => {
     if (!file) return
     setError(null)
@@ -33,7 +88,14 @@ export default function UploadZone() {
     }
   }
 
-  // Mehrere Dateien hochladen (mit optionaler Case-Erstellung)
+  /**
+   * Lädt mehrere Dateien sequenziell hoch und ordnet sie optional einem
+   * neu erstellten Fall zu. Wird vom MultiUploadModal nach Bestätigung aufgerufen.
+   *
+   * @param {File[]}      files    - Array der hochzuladenden Dateien
+   * @param {Object|null} caseInfo - Fall-Metadaten (case_name, case_number)
+   *                                 oder null wenn kein Fall erstellt werden soll
+   */
   const handleMultiUpload = async (files, caseInfo) => {
     setError(null)
     setUploading(true)
@@ -46,12 +108,12 @@ export default function UploadZone() {
 
       // Fall erstellen und alle Jobs zuordnen
       if (caseInfo) {
-        const newCase = createCase({
+        const newCase = await createCase({
           case_name: caseInfo.case_name,
           case_number: caseInfo.case_number || '',
         })
         for (const jobId of jobIds) {
-          addJobToCase(newCase.case_id, jobId)
+          await addJobToCase(newCase.case_id, jobId)
         }
       }
     } catch (err) {
@@ -62,7 +124,13 @@ export default function UploadZone() {
     }
   }
 
-  // Files verarbeiten — 1 Datei: direkt, mehrere: Modal
+  /**
+   * Verzweigt je nach Dateianzahl in Single-Upload oder Multi-Upload-Modal.
+   * FileList wird zu einem echten Array kopiert, da FileList eine
+   * Live-Referenz zum DOM ist und leer wird sobald input.value='' gesetzt wird.
+   *
+   * @param {FileList|null} fileList - Dateien aus Drop-Event oder file-Input
+   */
   const handleFiles = (fileList) => {
     if (!fileList || fileList.length === 0) return
     // FileList ist eine Live-Referenz zum DOM — wird leer wenn input.value='' gesetzt wird.
@@ -75,14 +143,21 @@ export default function UploadZone() {
     }
   }
 
+  /**
+   * Drop-Handler: Verhindert Browser-Standard (Datei öffnen) und
+   * leitet die abgelegten Dateien an handleFiles weiter.
+   */
   const onDrop = (e) => {
     e.preventDefault()
     setIsDragging(false)
     handleFiles(e.dataTransfer.files)
   }
 
+  // ── Render ─────────────────────────────────────────────────────────────
+
   return (
     <div className="p-3">
+      {/* ── Drop-Bereich (klickbar + drag-sensitiv) ──────────────────── */}
       <div
         onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
         onDragLeave={() => setIsDragging(false)}
@@ -99,6 +174,7 @@ export default function UploadZone() {
           ${uploading ? 'pointer-events-none opacity-60' : ''}
         `}
       >
+        {/* Verstecktes file-Input — wird programmatisch durch Klick ausgelöst */}
         <input
           ref={fileRef}
           type="file"
@@ -107,10 +183,12 @@ export default function UploadZone() {
           multiple
           onChange={(e) => {
             handleFiles(e.target.files)
+            // Input zurücksetzen damit dieselbe Datei erneut gewählt werden kann
             e.target.value = ''
           }}
         />
 
+        {/* Inhalt wechselt zwischen Upload-Icon und Lade-Spinner */}
         {uploading ? (
           <>
             <div className="w-6 h-6 border-2 border-accent-blue border-t-transparent rounded-full animate-spin" />
@@ -126,6 +204,7 @@ export default function UploadZone() {
         )}
       </div>
 
+      {/* ── Fehleranzeige ──────────────────────────────────────────────── */}
       {error && (
         <div className="flex items-center gap-2 mt-2 p-2 rounded-lg bg-risk-critical/10 text-risk-critical text-xs">
           <AlertCircle size={14} />
@@ -133,7 +212,7 @@ export default function UploadZone() {
         </div>
       )}
 
-      {/* Multi-Upload Modal */}
+      {/* ── Multi-Upload Modal (erscheint bei ≥2 Dateien) ─────────────── */}
       {pendingFiles && (
         <MultiUploadModal
           files={pendingFiles}

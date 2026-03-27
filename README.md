@@ -1,6 +1,6 @@
 # LFX — Forensic Analysis System
 
-Automatisiertes digitales Forensik-Analysesystem mit LLM-Integration. Kombiniert klassische Forensik-Tools (Dissect, Sleuth Kit, UAC) mit KI-basierter Analyse (Ollama/Llama 3.1), ML-Anomalieerkennung (Isolation Forest), MITRE ATT&CK Mapping mit interaktiver Kill Chain Visualisierung, Multi-Agent-System, quellenuebergreifender Fallkorrelation, Threat Intelligence Lookup (lokale KB + AbuseIPDB) und Evidence Integrity (SHA256 Chain of Custody).
+Automatisiertes digitales Forensik-Analysesystem mit LLM-Integration. Kombiniert klassische Forensik-Tools (Dissect, Sleuth Kit) mit KI-basierter Analyse (Ollama/Llama 3.1), ML-Anomalieerkennung (Isolation Forest), erweitertem MITRE ATT&CK Mapping (85 Techniken inkl. Resource Development / C2), Multi-Partition-Disk-Image-Analyse, 15 Linux-spezifischen Log-Parsern, Taetersinfrastruktur-Perspektive (Multi-Agent), quellenuebergreifender Fallkorrelation, Threat Intelligence Lookup (lokale KB + AbuseIPDB), Evidence Integrity (MD5 + SHA256 Chain of Custody), System-Profiling und Anti-Forensics-Erkennung.
 
 ---
 
@@ -26,6 +26,7 @@ Automatisiertes digitales Forensik-Analysesystem mit LLM-Integration. Kombiniert
   - [Fallbeispiel 5: Evidence Integrity — Beweismittel-Integritaet sichern](#fallbeispiel-5-evidence-integrity--beweismittel-integritaet-sichern)
   - [Fallbeispiel 6: Attack Kill Chain — Angriffsphase visualisieren](#fallbeispiel-6-attack-kill-chain--angriffsphase-visualisieren)
   - [Fallbeispiel 7: Threat Intelligence — IOCs gegen Bedrohungsdatenbanken pruefen](#fallbeispiel-7-threat-intelligence--iocs-gegen-bedrohungsdatenbanken-pruefen)
+  - [Fallbeispiel 8: Taetersinfrastruktur-Analyse — Angreifer-Perspektive einnehmen](#fallbeispiel-8-taetersinfrastruktur-analyse--angreifer-perspektive-einnehmen)
 - [Architektur](#architektur)
   - [Analyse-Pipeline](#analyse-pipeline)
   - [Multi-Agent-System](#multi-agent-system)
@@ -39,37 +40,72 @@ Automatisiertes digitales Forensik-Analysesystem mit LLM-Integration. Kombiniert
 ## Features
 
 ### Analyse & Erkennung
-- **8-stufige Analyse-Pipeline** — Automatische Verarbeitung von Disk-Images, Logs, Memory-Dumps und Netzwerk-Captures
+- **10-stufige Analyse-Pipeline** — Automatische Verarbeitung von Disk-Images und Log-Dateien
+- **Multi-Partition Disk-Image-Analyse** — Liest MBR/GPT-Partitionstabellen via pytsk3, analysiert jede Partition separat (ext2/3/4, XFS, Btrfs, NTFS, FAT, HFS+, APFS, ISO9660). Im Analytics-Tab Partition-Selector zum gezielten Filtern
+- **15 Linux-spezifische Log-Parser** — Vollstaendige Unterstuetzung des Linux-Log-Oekosystems (siehe Tabelle unten)
 - **ML-Anomalieerkennung** — Isolation Forest mit 8 Features (Uhrzeit, Event-Typ, Keywords, externe IPs, Dateigröße etc.)
-- **MITRE ATT&CK Auto-Mapping** — Automatische Zuordnung erkannter Anomalien zu MITRE-Techniken (offline, ohne API)
+- **MITRE ATT&CK Auto-Mapping (v15, 85 Techniken)** — Automatische Zuordnung zu MITRE-Techniken inkl. Resource Development (T1583/T1584/T1587/T1608), C2 (T1071/T1573/T1571), Persistence und Privilege Escalation (offline, ohne API)
+- **Taetersinfrastruktur vs. Opfersystem-Perspektive** — Jedes Event wird als `is_attacker_infra` oder Opfer-Event klassifiziert. Separate MITRE-Taktik-Sets fuer beide Perspektiven
 - **Attack Kill Chain Visualisierung** — Interaktives Diagramm aller 12 MITRE ATT&CK Phasen (Reconnaissance → Impact) mit farbkodierten aktiven Phasen, Anomalie-Zaehlern und aufklappbaren Technik-Details
-- **IOC-Extraktion** — Automatische Erkennung von IP-Adressen, Domains, Benutzerkonten, Prozessen und verdaechtigen Dateien
+- **IOC-Extraktion** — Automatische Erkennung von IP-Adressen, Domains, Benutzerkonten, Prozessen, verdaechtigen Dateien und C2-Infrastruktur-IOCs (aus Anomalie-Events extrahiert)
 - **Threat Intelligence Lookup** — IOC-Abgleich gegen lokale Knowledge-Base und optional AbuseIPDB (IP-Reputation). Farbige Verdict-Badges (Malicious/Suspicious/Clean/Unknown) mit Detail-Popup pro IOC
-- **Evidence Integrity (Chain of Custody)** — SHA256-Hash-Berechnung beim Upload, Verifikations-Endpoint, lueckenloser Audit-Trail (Upload → Analyse → Verifikation). Hash auf PDF-Deckblatt
+- **Evidence Integrity (Chain of Custody)** — MD5- und SHA256-Hash-Berechnung (Dual-Hash) beim Upload, Verifikations-Endpoint, lueckenloser Audit-Trail (Upload → Analyse → Verifikation). Hashes auf PDF-Deckblatt
+- **System-Profiling** — Automatische Erkennung von Betriebssystem, Distribution, Kernel, Hostname, Benutzerkonten, laufenden Diensten, Netzwerk-IPs und verdaechtigen Verzeichnissen aus der Event-Timeline (FA-22)
+- **Anti-Forensics-Erkennung** — 9 Pruef-Kategorien (Timestomping, Log-Luecken, Wipe-Tools, Log-Clearing, Systemzeit-Manipulation, Rootkit-Indikatoren, Truncated Logs, Verdaechtige Loeschoperationen). Risiko-Score 0–100, MITRE ATT&CK Mapping pro Befund (FA-23)
 
-### KI-Analyse (Ollama, lokal)
+### KI-Analyse (Ollama, lokal, vollstaendig offline)
 - **Quick-Analyse** — Schnelle Bedrohungseinschaetzung der Top-Anomalien (1-2 Min)
-- **Multi-Agent-System** — 3 spezialisierte KI-Agenten arbeiten sequentiell:
+- **Multi-Agent-System mit zwei Modi** — 3 spezialisierte KI-Agenten arbeiten sequentiell:
+  - **Modus `standard`** (Opfer-Perspektive): Klassischer DFIR-Ansatz — Was ist dem Opfer passiert?
+  - **Modus `attacker_infra`** (Taetersinfrastruktur-Perspektive): Analysiert C2-Server, VPN-Nutzung, Tool-Staging, Exfiltration — Wer war der Taeter und wie hat er seine Infrastruktur aufgebaut?
   - **Triage Agent** (SOC Level 1): Klassifiziert Anomalien als KRITISCH / VERDAECHTIG / FALSE POSITIVE
   - **Analyst Agent** (Senior DFIR): Korreliert Events, erstellt Angriffsketten, mappt MITRE ATT&CK
   - **Reporter Agent** (Forensik-Autor): Erstellt gerichtsverwertbaren Bericht
 - **Case Correlation Agent** — Quellenuebergreifende Korrelation: Findet gemeinsame IOCs, zeitliche Muster und Angriffsketten ueber mehrere Dateien
 
 ### Fall-Management & UI
-- **Case Management** — Dateien in Fall-Ordner gruppieren per Drag & Drop
+- **Case Management (backend-persistent)** — Faelle werden als JSON-Dateien im Backend gespeichert (`data/cases/`), nicht mehr nur im Browser-localStorage. 7 REST-Endpoints fuer vollstaendiges CRUD (FA-20)
 - **Sidebar Tree-View** — Hierarchische Ansicht: Faelle → Analysen, mit Suche und Inline-Umbenennung
 - **Bidirektionales Drag & Drop** — Analysen zwischen Faellen verschieben oder herauslösen
-- **3 Analyse-Views** — Overview (Zusammenfassung), Analytics (Charts), Intelligence (KI-Analyse)
-- **PDF-Export** — Professionelle forensische Berichte (Einzelanalyse + Fall-Korrelation)
-- **Persistenz** — Alle Ergebnisse und Einstellungen bleiben ueber Browser-Sessions erhalten (localStorage)
+- **3 Analyse-Views** — Overview (Zusammenfassung + System-Profil-Card), Analytics (Charts + Partition-Selector), Intelligence (KI-Analyse + Taetersinfrastruktur-Tab + Anti-Forensics-Tab)
+- **PDF-Export (gerichtsverwertbar)** — Professionelle forensische Berichte nach ISO/IEC 27037:2012 und ENFSI Best Practice Manual (2015). Zwei Report-Typen:
+  - **Standard-PDF** (`/export-pdf`): Einzelanalyse — 8 nummerierte Sektionen inkl. Chain of Custody, Executive Summary mit Risiko-Banner, risikokodierte Anomalien-Tabelle mit Score-Balken, Fundstellen-Nachweis, MITRE ATT&CK, IOCs, Methodologie mit IsolationForest-Parametern und Software-Versionen, Limitationen, Sachverstaendigen-Erklaerung
+  - **Full-PDF** (`/export-full-pdf`): Wie Standard-PDF plus Sektion 9 (KI-Reporter-Analysebericht), Anhang A (SOC Level 1 Triage) und Anhang B (Senior DFIR Analyst) — jeweils mit Agent-Infobox und strukturiertem Markdown-Rendering
+  - **Fall-PDF** (`/export-case-pdf`): Quellenuebergreifender Korrelationsbericht fuer mehrere Quellen
+- **Fundstellen-Nachweis (Provenance)** — Pro erkannter Anomalie wird exakt dokumentiert: Asservat-Datei, Dateipfad/Inode, Zeilennummer, Partition, verwendetes Tool. Gespeichert in `provenance.json` und als eigene PDF-Sektion (4a). Ermoeglicht vollstaendige Reproduzierbarkeit durch unabhaengige Gutachter.
+- **Persistenz** — Job-Metadaten (`job_meta.json`) und Faelle (`data/cases/*.json`) auf Disk. Ueberleben Backend-Neustart.
 
 ### Unterstuetzte Dateiformate
+
+#### Disk-Images
+| Format | Beschreibung |
+|---|---|
+| `.dd`, `.raw`, `.img` | Raw-Disk-Images |
+| `.e01`, `.ewf` | EnCase Expert Witness Format |
+| `.vdi`, `.vmdk` | VirtualBox / VMware |
+| `.qcow2` | QEMU/KVM |
+| `.vhdx` | Hyper-V |
+| `.aff` | Advanced Forensic Format |
+
+#### Linux-Log-Formate (neu)
+| Log-Typ | Dateien / Format |
+|---|---|
+| **Auth / Syslog** | `auth.log`, `syslog` (RFC 3164) |
+| **systemd Journal** | Binaer via `journalctl --output=json` |
+| **iptables / ufw** | Kernel-Log-Format (SRC/DST/PROTO/SPT/DPT) |
+| **Linux Audit** | `audit.log` (type=SYSCALL/EXECVE/USER_AUTH/PATH/SOCKADDR) |
+| **APT / dpkg** | `apt/history.log`, `dpkg.log` |
+| **YUM / DNF** | `yum.log`, `dnf.log` |
+| **wtmp / btmp** | Binaer (C-struct `utmp`, 384 Bytes/Record) |
+| **MySQL** | Error Log, General Query Log |
+| **OpenVPN** | OpenVPN-Server-Log |
+| **Sysmon for Linux** | XML-Events |
+| **Apache / Nginx** | Combined Log Format |
+| **Generisch** | ISO 8601, Pipe-getrennt, Fallback |
+
+#### Weitere Formate
 | Kategorie | Formate |
 |---|---|
-| Disk-Images | `.dd`, `.raw`, `.img`, `.e01`, `.ewf`, `.vdi`, `.vmdk` |
-| Memory-Dumps | `.mem`, `.dmp`, `.dump` |
-| Logs | `.log`, `.txt`, `.syslog`, `.evtx` |
-| Netzwerk | `.pcap`, `.pcapng` |
 | Archive | `.zip`, `.tar`, `.gz` |
 
 ---
@@ -385,9 +421,10 @@ docker compose -f docker/docker-compose.yml up -d ollama
 | Daten | Speicherort | Persistenz |
 |---|---|---|
 | Hochgeladene Dateien & Ergebnisse | `data/` (Bind-Mount) | Auf dem Host-System, bleibt immer erhalten |
+| Faelle (Case Management) | `data/cases/` (Bind-Mount) | Auf dem Host-System, backend-persistent |
 | Log-Dateien | `logs/` (Bind-Mount) | Auf dem Host-System |
 | Ollama-Modelle | Docker-Volume `ollama-data` | Ueberlebt `down`, wird nur bei `down -v` geloescht |
-| Fall-Management & UI-Einstellungen | Browser localStorage | Im Browser des Nutzers |
+| UI-Einstellungen | Browser localStorage | Im Browser des Nutzers |
 
 ---
 
@@ -522,14 +559,15 @@ Die Datei `frontend/.env` steuert das Frontend:
 
 1. **Browser oeffnen:** http://localhost:5173
 2. **Datei hochladen:** Die `auth.log` in die Upload-Zone (unten links in der Sidebar) per Drag & Drop ziehen
-3. **Analyse abwarten:** Der StatusMonitor in der Sidebar zeigt den Fortschritt der 8-stufigen Pipeline:
-   - Dateityp-Erkennung → Log-Parsing → Normalisierung → Anomalieerkennung → MITRE-Mapping → KI-Vorverarbeitung → Report
+3. **Analyse abwarten:** Der StatusMonitor in der Sidebar zeigt den Fortschritt der 10-stufigen Pipeline:
+   - Dateityp-Erkennung → Log-Parsing → Normalisierung → System-Profiling → Anti-Forensics-Check → Anomalieerkennung → MITRE-Mapping → KI-Vorverarbeitung → Report
 4. **Ergebnisse ansehen:**
 
    **Overview-Tab:**
    - Executive Summary mit Gesamtrisiko (KRITISCH/HOCH/MITTEL/NIEDRIG)
    - Stat-Cards: Anzahl Events, Anomalien, IOCs
-   - Evidence Integrity: SHA256-Hash mit Verifikation und Audit-Trail
+   - Evidence Integrity: MD5 + SHA256-Hash mit Verifikation und Audit-Trail
+   - System-Profil-Card: Erkanntes Betriebssystem, Kernel, Hostname, Dienste, Netzwerk-IPs
    - Key Findings: Die wichtigsten Erkenntnisse
    - IOC-Liste: Erkannte IP-Adressen, Domains, Benutzerkonten — mit optionalem Threat Intelligence Lookup
 
@@ -542,6 +580,7 @@ Die Datei `frontend/.env` steuert das Frontend:
    - **KI Quick-Analyse:** Klick auf "Analysieren" startet eine schnelle Ollama-Bedrohungsanalyse (1-2 Min)
    - **Attack Kill Chain:** Interaktives Diagramm aller 12 MITRE ATT&CK Phasen — zeigt sofort welche Angriffsphasen betroffen sind
    - **Anomalie-Liste:** Alle erkannten Anomalien mit Scores, Event-Typ und MITRE-Techniken
+   - **Anti-Forensics-Tab:** Risiko-Score (0–100) und alle erkannten Manipulations-Indikatoren (Timestomping, Log-Clearing, Rootkit usw.) mit MITRE-Tags und aufklappbaren Belegen
 
 ### Fallbeispiel 2: Multi-Agent Tiefenanalyse
 
@@ -570,11 +609,12 @@ Die Datei `frontend/.env` steuert das Frontend:
 
 **Schritte:**
 
-1. **Alle Dateien hochladen:** Jede Datei einzeln per Drag & Drop hochladen (jede wird unabhaengig analysiert)
+1. **Alle Dateien hochladen:** Einzeln oder gleichzeitig per Drag & Drop hochladen (jede wird unabhaengig analysiert). Bei Mehrfach-Upload erscheint ein Dialog zur optionalen Fall-Erstellung
 2. **Fall-Ordner erstellen:**
    - Klick auf "+" neben "Faelle" in der Sidebar
    - Fallname eingeben (z.B. "Vorfall Server-01")
-   - Optional: Aktenzeichen, Analyst
+   - Optional: Aktenzeichen, Analyst, Tags, Status
+   - Der Fall wird **sofort im Backend gespeichert** (`data/cases/`) und ueberlebt Browser-Reloads und Backend-Neustarts
 3. **Analysen zuordnen:** Die fertig analysierten Dateien per Drag & Drop in den Fall-Ordner ziehen
 4. **Fallkorrelation starten:**
    - Fall-Ordner aufklappen (Klick auf den Pfeil)
@@ -593,17 +633,35 @@ Die Datei `frontend/.env` steuert das Frontend:
 
 ### Fallbeispiel 4: PDF-Reports exportieren
 
-**Einzelanalyse-PDF:**
+**Standard-PDF (Einzelanalyse):**
 1. Overview-Tab oeffnen
-2. "PDF Export" Button klicken (oben rechts)
-3. PDF wird heruntergeladen mit: Deckblatt, Executive Summary, Anomalie-Tabelle, MITRE ATT&CK Mapping, IOC-Liste, Empfehlungen
+2. "PDF Export" Button klicken
+3. PDF enthaelt folgende Sektionen:
+   - **Sektion 1:** Auftrag und Untersuchungsumfang
+   - **Sektion 2:** Chain of Custody (MD5, SHA256, Analysezeitpunkt, Zugriffsart)
+   - **Sektion 3:** Executive Summary — grosses farbiges Gesamtrisiko-Banner (KRITISCH/HOCH/MITTEL/NIEDRIG), Metriken, Top-3 Befunde als farbige Callout-Boxen
+   - **Sektion 4:** Erkannte Anomalien — risikokodierte Zeilenfarben (rot/orange/gelb/gruen), Score-Balken pro Zeile
+   - **Sektion 4a:** Fundstellen-Nachweis (Provenance) — pro Anomalie: Asservat, Dateipfad, Zeilennummer/Inode, Partition, extrahiert mit (gem. ISO/IEC 27037:2012)
+   - **Sektion 5:** MITRE ATT&CK Zuordnung
+   - **Sektion 6:** Indicators of Compromise
+   - **Sektion 7:** Methodologie — IsolationForest-Hyperparameter, dynamische Software-Versionen (Python, scikit-learn, pytsk3 etc.)
+   - **Sektion 8:** Limitationen und Unsicherheiten (ENFSI-Pflichtabschnitt)
+   - Abschluss: Sachverstaendigen-Erklaerung
+
+**Full-PDF (mit KI-Analyse):**
+1. Nach abgeschlossener Multi-Agent-Analyse: "Full PDF" Button klicken
+2. Wie Standard-PDF, zusaetzlich:
+   - **Sektion 9:** KI-Forensischer Analysebericht (Reporter-Agent) mit strukturiertem Markdown-Rendering
+   - **Anhang A:** Triage-Klassifizierung (SOC Level 1 Agent)
+   - **Anhang B:** DFIR-Tiefenanalyse (Senior Analyst Agent)
+   - Jede KI-Sektion hat eine farbige Agent-Infobox mit Rollenbeschreibung und KI-Hinweis
 
 **Fall-Korrelations-PDF:**
 1. Fallkorrelation durchfuehren (siehe Fallbeispiel 3)
 2. "Case PDF" Button klicken
-3. PDF wird heruntergeladen mit: Fall-Deckblatt, Quellen-Uebersicht, geteilte IOCs, kombinierte MITRE-Tabelle, Korrelationsbericht
+3. PDF enthaelt: Fall-Deckblatt, Quellen-Uebersicht, quellenuebergreifende IOCs, kombinierte MITRE-Tabelle, Korrelationsbericht
 
-> Die PDFs sind im professionellen Forensik-Report-Format gestaltet mit dem Vermerk "VERTRAULICH" und eignen sich fuer die Dokumentation und Weitergabe.
+> Alle PDFs sind schreibgeschuetzt (kein Bearbeiten) und tragen den Vermerk "VERTRAULICH". Geeignet als gerichtsverwertbare Dokumentation gem. ISO/IEC 27037:2012 und ENFSI Best Practice Manual (2015).
 
 ### Fallbeispiel 5: Evidence Integrity — Beweismittel-Integritaet sichern
 
@@ -617,21 +675,21 @@ Die Datei `frontend/.env` steuert das Frontend:
 
 **Schritte:**
 
-1. **Datei hochladen:** Ziehe die Datei in die Upload-Zone. Das System berechnet **automatisch** einen SHA256-Hash und zeigt ihn im Upload-Response
+1. **Datei hochladen:** Ziehe die Datei in die Upload-Zone. Das System berechnet **automatisch** MD5- und SHA256-Hash (Dual-Hash) und zeigt beide im Upload-Response
 2. **Overview-Tab oeffnen:** Unterhalb der Risiko-Uebersicht erscheint die **"Evidence Integrity"**-Card:
-   - **SHA256-Hash** in Monospace-Schrift (klick auf Copy-Icon zum Kopieren)
+   - **SHA256-Hash** und **MD5-Hash** in Monospace-Schrift (Klick auf Copy-Icon zum Kopieren)
    - **Status-LED:** Grau = "Nicht geprueft" (Standardzustand nach Upload)
 3. **Integritaet verifizieren:** Klick auf **"Verifizieren"**:
-   - Das Backend berechnet den SHA256-Hash der gespeicherten Datei erneut
-   - Vergleicht mit dem beim Upload berechneten Original-Hash
-   - **Gruenes Shield** = Datei unverändert (Hash stimmt ueberein)
+   - Das Backend berechnet beide Hashes der gespeicherten Datei erneut
+   - Vergleicht mit den beim Upload berechneten Original-Hashes
+   - **Gruenes Shield** = Datei unveraendert (Hashes stimmen ueberein)
    - **Rotes Shield** = Datei wurde nach dem Upload veraendert (ALARM!)
 4. **Audit-Trail pruefen:** Nach der Verifikation erscheint eine chronologische Timeline:
    - `Datei hochgeladen` — Zeitstempel + Dateigroesse + Hash
    - `Analyse gestartet` — Zeitstempel + Output-Pfad
    - `Analyse abgeschlossen` — Zeitstempel + erzeugte Dateien
    - `Integritaet geprueft` — Zeitstempel + Ergebnis (OK / FAIL)
-5. **PDF-Export:** Der SHA256-Hash erscheint automatisch auf dem **Deckblatt** des PDF-Reports — ideal fuer die Aktenablage
+5. **PDF-Export:** MD5- und SHA256-Hash erscheinen automatisch auf dem **Deckblatt** des PDF-Reports — ideal fuer die Aktenablage
 
 > **Tipp:** Den Hash bei der ersten Analyse notieren und spaeter per "Verifizieren" gegenkontrollieren. So entsteht eine nachvollziehbare Beweiskette, die auch Monate spaeter belastbar ist.
 
@@ -711,32 +769,90 @@ cd backend && uvicorn api:app --port 8000
 
 > **Tipp:** Die lokale Knowledge-Base unter `rag/knowledge_base/iocs.json` kann jederzeit mit eigenen IOCs erweitert werden. Format pro Eintrag: `{"value": "1.2.3.4", "type": "ip", "threat": "Known C2 Server", "source": "MISP", "confidence": "high", "tags": ["malware", "c2"]}`.
 
+### Fallbeispiel 8: Taetersinfrastruktur-Analyse — Angreifer-Perspektive einnehmen
+
+**Szenario:** Die Standard-Analyse hat einen kompromittierten Server identifiziert. Jetzt willst du die Perspektive wechseln: Nicht mehr "Was ist dem Opfer passiert?" — sondern "Wie hat der Angreifer seine Infrastruktur aufgebaut, welche Tools eingesetzt und wie die Daten exfiltriert?"
+
+**Wann ist das nuetzlich?**
+- **Angriffsattribution:** C2-Server, VPN-Einwahl-IPs und eingesetzte Tools identifizieren, um den Angreifer zu charakterisieren
+- **Threat Hunting:** Bekannte Angreifer-Infrastruktur in anderen Logs wiederfinden (IOCs exportieren und querpruefen)
+- **Incident Reporting an Behoerden:** Behoerden benoetigen Informationen zur Taeter-Infrastruktur, nicht nur zum Schaden auf dem Opfer-System
+- **Red-Team-Bericht vervollstaendigen:** Eigene Pentesting-Logs auswerten — welche Infrastruktur wurde verwendet und welche Spuren hat sie hinterlassen?
+
+**Schritte:**
+
+1. **Datei hochladen & Analyse abwarten** (wie in Fallbeispiel 1)
+2. **Intelligence-Tab oeffnen**
+3. **"Taetersinfrastruktur" Sub-Tab anklicken:**
+   - Zeigt ausschliesslich Anomalien mit Bezug zur Angreifer-Infrastruktur
+   - Taktik-Uebersicht: nur Attacker-seitige MITRE-Taktiken (Resource Development, C2, Exfiltration)
+   - Separate Event-Liste: C2-Beacons, VPN-Verbindungen, Tool-Staging, Reverse-Shell-Versuche, Datenexfiltration
+4. **Attacker Infrastructure IOCs ansehen (Overview-Tab):**
+   - Oberhalb der normalen IOC-Liste erscheint die **"Attacker Infrastructure"**-Sektion (rot hervorgehoben)
+   - **C2/Infra IPs:** Externe IPs aus C2-Beacon- und Netzwerk-Events
+   - **C2 Domains:** DNS-Queries aus Attacker-Infrastruktur-Events
+   - **Eingesetzte Tools:** Pakete aus `suspicious_tool_installed`-Events (z.B. `netcat`, `socat`, `nmap`)
+5. **Multi-Agent-Analyse im Taetersinfrastruktur-Modus starten:**
+   - Im Intelligence-Tab: **"Agenten-Analyse starten"** klicken
+   - Die 3 Agenten (Triage, Analyst, Reporter) erhalten spezialisierte Prompts aus **Angreifer-Perspektive:**
+     - Triage fokussiert auf C2-Indikatoren und Staging-Aktivitaet
+     - Analyst rekonstruiert Angriffs-Toolkit, Zugangsweg und Exfiltrations-Route
+     - Reporter erstellt Bericht ueber Taeter-Infrastruktur (IOC-Liste fuer Strafverfolgung)
+
+> **Hinweis:** Der Wechsel zwischen Standard- und Taetersinfrastruktur-Modus ist auch ueber den API-Parameter `mode=attacker_infra` moeglich:
+> ```bash
+> curl -N "http://localhost:8000/agent-analyze/JOB_ID?mode=attacker_infra"
+> ```
+
 ---
 
 ## Architektur
 
 ### Analyse-Pipeline
 
-Die Backend-Pipeline verarbeitet jede hochgeladene Datei in 8 Phasen:
+Die Backend-Pipeline verarbeitet jede hochgeladene Datei in 10 Phasen:
 
 ```
-Datei-Upload + SHA256-Hash (Evidence Integrity)
+Datei-Upload + MD5 + SHA256-Hash (Evidence Integrity, Dual-Hash)
     ↓
-[1] Dateityp-Erkennung        → disk_image / logs / ram_dump / pcap
+[1]  Dateityp-Erkennung        → disk_image / logs / uac_dump
     ↓
-[2] Daten-Extraktion           → Log-Parser / Dissect / Sleuth Kit
+[2]  Daten-Extraktion
+     ├─ Disk-Images  → Sleuth Kit: MBR/GPT-Partitionstabelle lesen,
+     │                  jede Partition separat analysieren (Multi-Partition)
+     ├─ Disk-Images  → Dissect: MFT, EventLogs, Registry, Users
+     └─ Log-Dateien  → 15 spezialisierte Linux-Log-Parser
+                        (auth.log, syslog, audit.log, iptables, OpenVPN,
+                         Apache/Nginx, MySQL, APT/YUM, wtmp/btmp, Sysmon ...)
     ↓
-[3] Normalisierung             → Einheitliches Event-Format
+[3]  Normalisierung             → Einheitliches Event-Format (mit partition-Feld)
     ↓
-[4] Anomalieerkennung (ML)     → Isolation Forest (8 Features, Score 0-1)
+[4]  Anomalieerkennung (ML)     → Isolation Forest (8 Features, Score 0-1)
     ↓
-[5] MITRE ATT&CK Mapping      → Event-Typ → Technik-IDs (offline)
+[5]  MITRE ATT&CK Mapping      → Event-Typ → Technik-IDs (offline, 85 Techniken)
+                                   + is_attacker_infra Flag pro Event
     ↓
-[6] KI-Vorverarbeitung         → Top-1000 verdaechtige Events + IOC-Extraktion
+[5b] System-Profiling           → OS-Typ, Distribution, Kernel, Hostname,
+                                   Benutzer, Dienste, Netzwerk-IPs, Verdaechtige-Dirs
+                                   → system_profile.json
     ↓
-[7] Report-Generierung         → Markdown-Bericht
+[5c] Anti-Forensics-Check       → 9 Pruef-Kategorien: Timestomping, Log-Luecken,
+                                   Timestamp-Cluster, Wipe-Tools, Log-Clearing,
+                                   Zeit-Manipulation, Rootkit-Indikatoren,
+                                   Truncated Logs, Verdaechtige Loeschungen
+                                   → antiforensics_report.json (Risiko-Score 0-100)
     ↓
-[8] Export                     → JSON, CSV, Summary (inkl. SHA256-Hash)
+[6]  KI-Vorverarbeitung         → Top-1000 verdaechtige Events + IOC-Extraktion
+    ↓
+[7]  Report-Generierung         → Markdown-Bericht
+    ↓
+[8]  Export                     → JSON, CSV, Summary (inkl. MD5 + SHA256-Hash)
+                                   + job_meta.json (gegen Backend-Neustart)
+    ↓
+[9]  Fundstellen-Nachweis       → ProvenanceEnricher: Pro Anomalie exakte
+     (Provenance)                  Herkunft dokumentieren (Asservat, Pfad,
+                                   Zeilennummer, Partition, Tool)
+                                   → provenance.json
 ```
 
 **Anomalieerkennung — 8 ML-Features:**
@@ -754,27 +870,57 @@ Datei-Upload + SHA256-Hash (Evidence Integrity)
 
 ### Multi-Agent-System
 
-3 spezialisierte LLM-Agenten arbeiten sequentiell (SSE-Streaming):
+3 spezialisierte LLM-Agenten arbeiten sequentiell (SSE-Streaming). Das System unterstuetzt **zwei Modi**, die per `?mode=` Parameter gewaehlt werden:
 
+**Modus `standard`** (Standard, Opfer-Perspektive) — Klassischer DFIR-Ansatz:
 ```
 Anomalien + IOCs
        ↓
-┌──────────────────┐
-│  TRIAGE AGENT    │  SOC Level 1: Klassifiziert jede Anomalie
-│  (Temp: 0.3)     │  → KRITISCH / VERDAECHTIG / FALSE POSITIVE
-└────────┬─────────┘
-         ↓ Triage-Ergebnisse
-┌──────────────────┐
-│  ANALYST AGENT   │  Senior DFIR: Korreliert Events, baut
-│  (Temp: 0.4)     │  Angriffskette, mappt MITRE ATT&CK
-└────────┬─────────┘
-         ↓ Analyse-Ergebnisse
-┌──────────────────┐
-│  REPORTER AGENT  │  Forensik-Autor: Erstellt formalen
-│  (Temp: 0.4)     │  gerichtsverwertbaren Bericht
-└────────┬─────────┘
-         ↓
-   Forensischer Bericht
+┌──────────────────────────────────────────┐
+│  TRIAGE AGENT (Temp: 0.3)                │
+│  SOC Level 1: Klassifiziert jede         │
+│  Anomalie → KRITISCH / VERDAECHTIG /     │
+│  FALSE POSITIVE                          │
+└────────────────────┬─────────────────────┘
+                     ↓
+┌──────────────────────────────────────────┐
+│  ANALYST AGENT (Temp: 0.4)               │
+│  Senior DFIR: Was ist dem Opfer          │
+│  passiert? Angriffskette, MITRE ATT&CK   │
+└────────────────────┬─────────────────────┘
+                     ↓
+┌──────────────────────────────────────────┐
+│  REPORTER AGENT (Temp: 0.4)              │
+│  Forensik-Autor: Gerichtsverwertbarer    │
+│  Bericht (Executive Summary, Empfehlung) │
+└────────────────────┬─────────────────────┘
+                     ↓
+               Forensischer Bericht
+```
+
+**Modus `attacker_infra`** (Taetersinfrastruktur-Perspektive) — Angreifer-Fokus:
+```
+Attacker-Infra-Events (C2, VPN, Tools, Exfiltration)
+       ↓
+┌──────────────────────────────────────────┐
+│  TRIAGE AGENT                            │
+│  Fokus: C2-Indikatoren, Staging,         │
+│  Tool-Downloads, VPN-Muster              │
+└────────────────────┬─────────────────────┘
+                     ↓
+┌──────────────────────────────────────────┐
+│  ANALYST AGENT                           │
+│  Rekonstruiert Angreifer-Toolkit,        │
+│  C2-Infrastruktur, Exfiltrations-Route   │
+└────────────────────┬─────────────────────┘
+                     ↓
+┌──────────────────────────────────────────┐
+│  REPORTER AGENT                          │
+│  Taeter-Infrastruktur-Bericht            │
+│  (IOC-Liste fuer Strafverfolgung)        │
+└────────────────────┬─────────────────────┘
+                     ↓
+     Taetersinfrastruktur-Bericht
 ```
 
 ### Case Correlation Agent
@@ -815,33 +961,63 @@ Job 3 (syslog) ────┘         ↓
 | Methode | Endpoint | Beschreibung |
 |---|---|---|
 | `POST` | `/llm-analyze` | Quick/Full LLM-Analyse (JSON) |
-| `GET` | `/agent-analyze/{job_id}` | Multi-Agent-Analyse (SSE-Stream) |
+| `GET` | `/agent-analyze/{job_id}?mode=standard` | Multi-Agent-Analyse, Opfer-Perspektive (SSE-Stream) |
+| `GET` | `/agent-analyze/{job_id}?mode=attacker_infra` | Multi-Agent-Analyse, Taetersinfrastruktur-Perspektive (SSE-Stream) |
 | `POST` | `/case-correlate` | Quellenuebergreifende Fallkorrelation (SSE-Stream) |
+
+**`mode`-Parameter fuer `/agent-analyze/{job_id}`:**
+
+| Wert | Beschreibung | Fokus |
+|---|---|---|
+| `standard` (Default) | Klassischer DFIR-Ansatz | Was ist dem Opfer passiert? Angriffskette aus Opfer-Sicht |
+| `attacker_infra` | Taetersinfrastruktur-Analyse | C2-Server, VPN, Tool-Staging, Exfiltrations-Route des Angreifers |
+
+### System-Profiling & Anti-Forensics
+
+| Methode | Endpoint | Beschreibung |
+|---|---|---|
+| `GET` | `/system-profile/{job_id}` | System-Profil abrufen (OS, Kernel, Dienste, Netzwerk-IPs) |
+| `GET` | `/antiforensics/{job_id}` | Anti-Forensics-Report (Risiko-Score, Findings, MITRE-Tags) |
+
+### Fall-Management (Cases)
+
+| Methode | Endpoint | Beschreibung |
+|---|---|---|
+| `GET` | `/cases` | Alle Faelle auflisten |
+| `POST` | `/cases` | Neuen Fall erstellen |
+| `PUT` | `/cases/{case_id}` | Fall aktualisieren (Name, Analyst, Status, Tags) |
+| `DELETE` | `/cases/{case_id}` | Fall loeschen |
+| `POST` | `/cases/{case_id}/jobs` | Job einem Fall hinzufuegen |
+| `DELETE` | `/cases/{case_id}/jobs/{job_id}` | Job aus einem Fall entfernen |
 
 ### Evidence Integrity & Threat Intelligence
 
 | Methode | Endpoint | Beschreibung |
 |---|---|---|
-| `POST` | `/verify/{job_id}` | SHA256-Verifikation + Audit-Trail abrufen |
+| `POST` | `/verify/{job_id}` | MD5 + SHA256-Verifikation (Dual-Hash) + Audit-Trail abrufen |
 | `POST` | `/threat-intel/lookup` | IOC-Abgleich gegen lokale KB + AbuseIPDB |
 
 ### Export
 
 | Methode | Endpoint | Beschreibung |
 |---|---|---|
-| `POST` | `/export-pdf/{job_id}` | Einzelanalyse als PDF |
-| `POST` | `/export-case-pdf` | Fall-Korrelation als PDF |
+| `POST` | `/export-pdf/{job_id}` | Standard-PDF (8 Sektionen: Chain of Custody, Anomalien, Provenance, MITRE, IOCs, Methodologie) |
+| `POST` | `/export-full-pdf/{job_id}` | Full-PDF inkl. Multi-Agent-Ergebnisse (Sektion 9 + Anhang A/B) |
+| `POST` | `/export-case-pdf` | Fall-Korrelations-PDF (mehrere Quellen) |
 
 ### Output-Dateien pro Analyse
 
 | Datei | Format | Inhalt |
 |---|---|---|
-| `analysis_summary.json` | JSON | Metadaten: Events, Anomalien, IOCs, Zeitstempel |
+| `analysis_summary.json` | JSON | Metadaten: Events, Anomalien, IOCs, Zeitstempel, MD5 + SHA256 |
 | `anomalies_detected.json` | JSON | Alle Anomalien mit Scores und MITRE-Mapping |
 | `normalized_output.json` | JSON | Normalisierte Timeline aller Events |
 | `ai_preprocessed.json` | JSON | Gefilterte Events + extrahierte IOCs |
+| `system_profile.json` | JSON | OS-Typ, Kernel, Hostname, Benutzer, Dienste, Netzwerk-IPs |
+| `antiforensics_report.json` | JSON | Risiko-Score, Findings, MITRE-Tags, Evidenz-Belege |
 | `timeline.csv` | CSV | Komplette Event-Timeline |
 | `report.md` | Markdown | Forensischer Bericht |
+| `provenance.json` | JSON | Fundstellen-Nachweis: Pro Anomalie Asservat, Pfad, Zeilennummer, Partition, Tool (ISO/IEC 27037) |
 
 ### API-Beispiele
 
@@ -867,17 +1043,28 @@ curl -X POST http://localhost:8000/llm-analyze \
   -H "Content-Type: application/json" \
   -d '{"anomalies": [...], "mode": "quick"}'
 
-# Multi-Agent-Analyse (SSE-Stream)
+# Multi-Agent-Analyse (SSE-Stream, Opfer-Perspektive — Standard)
 curl -N http://localhost:8000/agent-analyze/20260218_143000_a1b2c3d4
+
+# Multi-Agent-Analyse (SSE-Stream, Taetersinfrastruktur-Perspektive)
+curl -N "http://localhost:8000/agent-analyze/20260218_143000_a1b2c3d4?mode=attacker_infra"
 
 # Fallkorrelation (SSE-Stream)
 curl -N -X POST http://localhost:8000/case-correlate \
   -H "Content-Type: application/json" \
   -d '{"job_ids": ["job_id_1", "job_id_2"], "case_name": "Vorfall-001"}'
 
-# Evidence-Integritaet verifizieren
+# Evidence-Integritaet verifizieren (Dual-Hash: MD5 + SHA256)
 curl -X POST http://localhost:8000/verify/20260218_143000_a1b2c3d4
-# → {"verified": true, "original_hash": "a1b2c3...", "current_hash": "a1b2c3...", "audit_trail": [...]}
+# → {"verified": true, "sha256_original": "a1b2c3...", "sha256_current": "a1b2c3...", "md5_original": "d4e5f6...", "audit_trail": [...]}
+
+# System-Profil abrufen
+curl http://localhost:8000/system-profile/20260218_143000_a1b2c3d4
+# → {"os_type": "linux", "distribution": "Ubuntu 22.04", "kernel": "5.15.0", "hostname": "webserver01", ...}
+
+# Anti-Forensics-Report abrufen
+curl http://localhost:8000/antiforensics/20260218_143000_a1b2c3d4
+# → {"risk_score": 65, "risk_level": "high", "findings_count": 3, "findings": [...]}
 
 # Threat Intelligence Lookup
 curl -X POST http://localhost:8000/threat-intel/lookup \
@@ -885,11 +1072,17 @@ curl -X POST http://localhost:8000/threat-intel/lookup \
   -d '{"indicators": {"ips": ["192.168.1.100", "10.0.0.1"], "domains": ["malicious.example.com"]}}'
 # → {"results": [{"value": "192.168.1.100", "verdict": "malicious", "confidence": "high", "sources": [...]}]}
 
-# PDF-Export
+# Standard-PDF (ohne KI-Agenten-Sektionen)
 curl -X POST http://localhost:8000/export-pdf/20260218_143000_a1b2c3d4 \
   -H "Content-Type: application/json" \
   -d '{"case_name": "Test", "analyst": "Max Mustermann"}' \
   -o report.pdf
+
+# Full-PDF (inkl. Sektion 9 + Anhang A/B, benoetigt abgeschlossene Agenten-Analyse)
+curl -X POST http://localhost:8000/export-full-pdf/20260218_143000_a1b2c3d4 \
+  -H "Content-Type: application/json" \
+  -d '{"case_name": "Test", "analyst": "Max Mustermann"}' \
+  -o full_report.pdf
 ```
 
 ---
@@ -901,7 +1094,7 @@ forensic-analysis-system/
 │
 ├── backend/                        # Python FastAPI Backend
 │   ├── api.py                      # REST API (alle Endpoints)
-│   ├── pipeline.py                 # 8-stufige Analyse-Pipeline
+│   ├── pipeline.py                 # 10-stufige Analyse-Pipeline
 │   ├── config.py                   # Zentrale Konfiguration
 │   ├── llm_agent/                  # LLM-Integration
 │   │   ├── agent.py                # ForensicLLMAgent (Basis-Agent)
@@ -912,12 +1105,15 @@ forensic-analysis-system/
 │   │   └── rag_handler.py          # RAG Knowledge Base
 │   ├── modules/                    # Analyse-Module
 │   │   ├── anomaly_detector.py     # ML-Anomalieerkennung (Isolation Forest)
-│   │   ├── mitre_mapper.py         # MITRE ATT&CK Auto-Mapping
+│   │   ├── mitre_mapper.py         # MITRE ATT&CK Auto-Mapping (85 Techniken)
 │   │   ├── ai_preprocessor.py      # Event-Filterung fuer LLM
-│   │   ├── pdf_generator.py        # PDF-Report-Generator (Einzel + Fall)
+│   │   ├── pdf_generator.py        # PDF-Report-Generator (Standard + Full + Fall)
 │   │   ├── normalizer.py           # Daten-Normalisierung
-│   │   ├── log_parser.py           # Log-Datei Parser
-│   │   ├── evidence_tracker.py     # Evidence Integrity (SHA256 + Audit-Trail)
+│   │   ├── log_parser.py           # Log-Datei Parser (15 Linux-Formate)
+│   │   ├── evidence_tracker.py     # Evidence Integrity (MD5 + SHA256 + Audit-Trail)
+│   │   ├── provenance_enricher.py  # Fundstellen-Nachweis (ISO/IEC 27037 Provenance)
+│   │   ├── system_profiler.py      # System-Profiling (OS, Kernel, Dienste, Netzwerk)
+│   │   ├── antiforensics_checker.py # Anti-Forensics-Erkennung (9 Kategorien)
 │   │   └── threat_intel.py         # Threat Intelligence Lookup (KB + AbuseIPDB)
 │   └── utils/                      # Hilfsfunktionen
 │       ├── file_detector.py        # Dateityp-Erkennung (libmagic + Heuristik)
@@ -951,7 +1147,8 @@ forensic-analysis-system/
 │       │   │   ├── OverviewPanel.jsx    # Hauptpanel (Summary, Stats)
 │       │   │   ├── FindingsCards.jsx     # Key Findings Karten
 │       │   │   ├── IOCList.jsx          # IOC-Anzeige mit Threat Intelligence Enrichment
-│       │   │   ├── EvidenceIntegrity.jsx # Evidence Integrity (Hash, Verify, Audit-Trail)
+│       │   │   ├── EvidenceIntegrity.jsx # Evidence Integrity (MD5+SHA256, Verify, Audit-Trail)
+│       │   │   ├── SystemProfileCard.jsx # System-Profil (OS, Kernel, Dienste, Netzwerk)
 │       │   │   └── LLMReportView.jsx    # KI-Bericht Darstellung
 │       │   ├── analytics/          # Analytics-View
 │       │   │   ├── AnalyticsPanel.jsx   # Hauptpanel (Charts + Tabelle)
@@ -959,10 +1156,11 @@ forensic-analysis-system/
 │       │   │   ├── ArtifactTaxonomy.jsx # Artefakt-Verteilung (Donut-Chart)
 │       │   │   └── EventTable.jsx       # Durchsuchbare Event-Tabelle
 │       │   ├── intelligence/       # Intelligence-View
-│       │   │   ├── IntelligencePanel.jsx # Hauptpanel (KI-Analyse)
+│       │   │   ├── IntelligencePanel.jsx # Hauptpanel (3 Tabs: Bedrohung / Infra / Anti-Forensics)
 │       │   │   ├── AttackGraph.jsx      # Attack Kill Chain Visualisierung (12 MITRE-Phasen)
 │       │   │   ├── AgentAnalysisView.jsx # Multi-Agent-Ergebnisse
-│       │   │   └── AnomalyList.jsx      # Anomalie-Liste mit Scores
+│       │   │   ├── AnomalyList.jsx      # Anomalie-Liste mit Scores
+│       │   │   └── AntiForensicsPanel.jsx # Anti-Forensics-Report (Risiko-Score, Findings)
 │       │   └── correlation/        # Korrelations-View
 │       │       └── CaseCorrelationPanel.jsx # Fall-Korrelation
 │       ├── context/
@@ -1009,6 +1207,7 @@ forensic-analysis-system/
 ├── data/                           # Daten-Verzeichnis (Git-ignoriert)
 │   ├── uploads/                    # Hochgeladene Dateien
 │   ├── outputs/                    # Analyse-Ergebnisse (pro Job-ID)
+│   ├── cases/                      # Backend-persistente Faelle (JSON-Dateien)
 │   ├── samples/                    # Test-/Beispieldaten
 │   └── llm_cache/                  # LLM-Response-Cache
 │
@@ -1039,6 +1238,14 @@ sudo apt-get install libmagic1      # Ubuntu/Debian
 brew install libmagic                # macOS
 pip install python-magic-bin         # Windows
 ```
+
+**`AttributeError: module 'pytsk3' has no attribute 'TSK_FS_TYPE_XFS'`**
+
+Aeltere pytsk3-Versionen unterstuetzen nicht alle Dateisystem-Typ-Konstanten. Die Pipeline verwendet `getattr(pytsk3, ..., None)` als Fallback — fehlende Konstanten werden automatisch uebersprungen. Falls der Fehler trotzdem auftritt:
+```bash
+pip install --upgrade pytsk3
+```
+Disk-Image-Analyse funktioniert auch ohne alle Konstanten — lediglich der Name des Dateisystems wird als `?` angezeigt.
 
 ### Ollama-Verbindung schlaegt fehl
 

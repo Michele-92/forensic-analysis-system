@@ -1,3 +1,35 @@
+/**
+ * ============================================================================
+ * IOC LIST — Indicators of Compromise mit Threat-Intelligence-Lookup
+ * ============================================================================
+ * Zeigt alle vom Backend extrahierten Indicators of Compromise (IOCs) an,
+ * gegliedert in zwei Bereiche:
+ *
+ *   1. Attacker Infrastructure (Täterinfrastruktur):
+ *      Automatisch aus Anomalien gefilterte C2-IPs, Domains und eingesetzte
+ *      Tools (nur Events die explizit auf Täterinfrastruktur hinweisen).
+ *
+ *   2. Standard IOCs:
+ *      Alle vom AIPreprocessor extrahierten Indikatoren in Kategorien:
+ *      IP-Adressen, Domains, Suspicious Files, Benutzer, Prozesse.
+ *      Mit optionalem Threat-Intelligence-Lookup via Backend-API.
+ *
+ * Threat-Intelligence-Ergebnisse werden pro IOC als Verdict-Badge angezeigt
+ * (malicious / suspicious / clean / unknown) und per Klick als Detail-Popup
+ * geöffnet (Quellen: lokale KB, AbuseIPDB).
+ *
+ * Props:
+ *   indicators — Objekt mit IOC-Arrays aus preprocessed.indicators
+ *
+ * State:
+ *   loading      — TI-Lookup läuft gerade
+ *   detailPopup  — aktuell geöffnetes TI-Detail-Popup (null = geschlossen)
+ *
+ * Abhängigkeiten:
+ *   AppContext (activeJob, updateJobData), backend API (lookupThreatIntel), lucide-react
+ *
+ * @component
+ */
 import React, { useState, useMemo } from 'react'
 import { useApp } from '../../context/AppContext'
 import { lookupThreatIntel } from '../../api/backend'
@@ -6,6 +38,12 @@ import {
   ShieldAlert, ShieldCheck, ShieldQuestion, X, Target, Network,
 } from 'lucide-react'
 
+// ── Konfiguration ─────────────────────────────────────────────────────────────
+
+/**
+ * Darstellungs-Konfiguration für die fünf IOC-Kategorien.
+ * `key` muss mit den Feldern in preprocessed.indicators übereinstimmen.
+ */
 const IOC_TYPES = [
   { key: 'ips',       label: 'IP Addresses',     icon: Server,   color: 'text-risk-high' },
   { key: 'domains',   label: 'Domains',           icon: Globe,    color: 'text-accent-purple' },
@@ -21,6 +59,10 @@ const ATTACKER_INFRA_EVENT_TYPES = new Set([
   'network_connect', 'dns_query',
 ])
 
+/**
+ * Farbschema und Icon-Mapping für TI-Verdicts.
+ * Wird sowohl für Badges in der Liste als auch im Detail-Popup verwendet.
+ */
 const VERDICT_CONFIG = {
   malicious:  { color: 'text-risk-critical', bg: 'bg-risk-critical/10', icon: ShieldAlert, label: 'Malicious' },
   suspicious: { color: 'text-risk-high',     bg: 'bg-risk-high/10',     icon: ShieldAlert, label: 'Suspicious' },
@@ -28,12 +70,27 @@ const VERDICT_CONFIG = {
   unknown:    { color: 'text-white/30',      bg: 'bg-white/[0.04]',     icon: ShieldQuestion, label: 'Unknown' },
 }
 
+// ── Hauptkomponente ───────────────────────────────────────────────────────────
+
+/**
+ * IOC-Übersicht mit Täterinfrastruktur-Sektion und Standard-IOC-Grid.
+ * Rendert nichts, wenn keine aktiven IOC-Kategorien vorhanden sind.
+ *
+ * @param {Object}    indicators             - IOC-Objekt aus preprocessed.indicators
+ * @param {string[]}  [indicators.ips]       - Liste der extrahierten IP-Adressen
+ * @param {string[]}  [indicators.domains]   - Liste der extrahierten Domains
+ * @param {string[]}  [indicators.files]     - Liste verdächtiger Dateipfade
+ * @param {string[]}  [indicators.users]     - Liste auffälliger Benutzer
+ * @param {string[]}  [indicators.processes] - Liste auffälliger Prozesse
+ */
 export default function IOCList({ indicators }) {
   const { activeJob, updateJobData } = useApp()
   const [loading, setLoading]       = useState(false)
   const [detailPopup, setDetailPopup] = useState(null)
 
-  // Täterinfrastruktur-IOCs aus Anomalien extrahieren
+  // ── Täterinfrastruktur-IOCs aus Anomalien extrahieren ─────────────────────
+  // Filtert Anomalien nach bekannten Infrastruktur-Event-Typen und sammelt
+  // zugehörige IPs, DNS-Query-Domains und installierte Tools.
   const infraIocs = useMemo(() => {
     const anomalies = activeJob?.data?.anomalies || []
     const infraIps     = new Set()
@@ -47,19 +104,19 @@ export default function IOCList({ indicators }) {
 
       if (!isInfra) continue
 
-      // IPs sammeln
+      // IPs sammeln (Loopback und IPv6-Loopback ausschließen)
       const srcIp = a.src_ip || a.metadata?.src_ip || a.client_ip
       const dstIp = a.dst_ip || a.metadata?.dst_ip
       if (srcIp && !srcIp.startsWith('127.') && srcIp !== '::1') infraIps.add(srcIp)
       if (dstIp && !dstIp.startsWith('127.') && dstIp !== '::1') infraIps.add(dstIp)
 
-      // Domains aus DNS-Queries
+      // Domains aus DNS-Queries extrahieren (aus Metadaten oder Message-Regex)
       if (a.event_type === 'dns_query') {
         const q = a.metadata?.query_name || a.message?.match(/fragt '([^']+)'/)?.[1]
         if (q) infraDomains.add(q)
       }
 
-      // Tools aus Package-Install / Staging
+      // Tools aus Package-Install / Staging-Events
       if (a.event_type === 'suspicious_tool_installed') {
         const pkg = a.package || a.metadata?.package
         if (pkg) infraTools.add(pkg)
@@ -74,18 +131,28 @@ export default function IOCList({ indicators }) {
   }, [activeJob?.data?.anomalies])
 
   const hasInfraIocs = infraIocs.ips.length > 0 || infraIocs.domains.length > 0 || infraIocs.tools.length > 0
+  // Nur Kategorien anzeigen, die tatsächlich Einträge haben
   const activeTypes  = IOC_TYPES.filter(t => indicators[t.key]?.length > 0)
 
   if (activeTypes.length === 0) return null
 
-  // TI-Ergebnisse aus Job-Daten laden
+  // TI-Ergebnisse aus Job-Daten laden (persistent im localStorage via AppContext)
   const tiResults = activeJob?.data?.threatIntelResults || []
 
+  /**
+   * Sucht das TI-Ergebnis für einen einzelnen IOC-Wert.
+   * @param {string} value - Der IOC-Wert (IP, Domain etc.)
+   * @returns {Object|null} TI-Ergebnis oder null wenn nicht vorhanden
+   */
   const getVerdictForIOC = (value) => {
     const result = tiResults.find(r => r.value === String(value))
     return result || null
   }
 
+  /**
+   * Startet den Threat-Intelligence-Lookup für alle aktuellen Indikatoren.
+   * Ergebnisse werden persistent in den Job-Daten (localStorage) gespeichert.
+   */
   const handleLookup = async () => {
     setLoading(true)
     try {
@@ -162,6 +229,7 @@ export default function IOCList({ indicators }) {
         </button>
       </div>
 
+      {/* IOC-Karten pro Kategorie */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {activeTypes.map(({ key, label, icon: Icon, color }) => (
           <div key={key} className="glass-card">
@@ -175,7 +243,7 @@ export default function IOCList({ indicators }) {
 
             <div className="space-y-1">
               {indicators[key].map((val, i) => {
-                const ti = getVerdictForIOC(val)
+                const ti      = getVerdictForIOC(val)
                 const verdict = ti ? VERDICT_CONFIG[ti.verdict] || VERDICT_CONFIG.unknown : null
 
                 return (
@@ -183,7 +251,7 @@ export default function IOCList({ indicators }) {
                     key={i}
                     className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-white/[0.03] transition-colors group"
                   >
-                    {/* Verdict badge */}
+                    {/* Verdict badge — klickbar wenn TI-Daten vorhanden */}
                     {verdict ? (
                       <button
                         onClick={() => setDetailPopup(ti)}
@@ -218,13 +286,23 @@ export default function IOCList({ indicators }) {
       {detailPopup && (
         <TIDetailPopup result={detailPopup} onClose={() => setDetailPopup(null)} />
       )}
-      </div> {/* Ende Standard IOCs */}
-    </div>   {/* Ende space-y-6 äußerer Container */}
+      </div>
+    </div>
   )
 }
 
-// ── Attacker Infrastructure IOC Card ──────────────────────────────────────────
+// ── Hilfskomponenten ──────────────────────────────────────────────────────────
 
+/**
+ * Karte für einen einzelnen Täterinfrastruktur-IOC-Typ (IPs, Domains oder Tools).
+ * Zeigt alle Items als monospace-Liste mit farblicher Hervorhebung.
+ *
+ * @param {string}          label      - Bezeichnung der Kategorie (z.B. "C2 / Infra IPs")
+ * @param {React.ReactNode} icon       - Lucide-Icon bereits als JSX
+ * @param {string[]}        items      - Liste der IOC-Werte
+ * @param {string}          colorClass - Tailwind-Textfarbe (z.B. "text-risk-critical")
+ * @param {string}          bgClass    - Tailwind-Hintergrundfarbe + Border (z.B. "bg-risk-critical/10 border-risk-critical/20")
+ */
 function InfraIocCard({ label, icon, items, colorClass, bgClass }) {
   return (
     <div className={`glass-card border ${bgClass}`}>
@@ -247,6 +325,19 @@ function InfraIocCard({ label, icon, items, colorClass, bgClass }) {
   )
 }
 
+/**
+ * Detail-Popup für ein einzelnes Threat-Intelligence-Ergebnis.
+ * Angezeigt nach Klick auf ein Verdict-Badge in der Standard-IOC-Liste.
+ * Schließt sich per Klick auf Backdrop oder X-Button (kein Escape-Handler).
+ *
+ * @param {Object}   result          - TI-Ergebnis-Objekt
+ * @param {string}   result.value    - IOC-Wert (IP, Domain etc.)
+ * @param {string}   result.verdict  - "malicious" | "suspicious" | "clean" | "unknown"
+ * @param {string}   result.confidence - Konfidenz-Einschätzung (z.B. "high")
+ * @param {string}   result.type     - IOC-Typ (z.B. "ip", "domain")
+ * @param {Object[]} [result.sources] - Array der TI-Quellen mit Details
+ * @param {Function} onClose         - Callback zum Schließen des Popups
+ */
 function TIDetailPopup({ result, onClose }) {
   const verdict = VERDICT_CONFIG[result.verdict] || VERDICT_CONFIG.unknown
 
@@ -286,7 +377,7 @@ function TIDetailPopup({ result, onClose }) {
           </div>
         </div>
 
-        {/* Sources */}
+        {/* Quellen-Details (lokale KB, AbuseIPDB etc.) */}
         {result.sources?.length > 0 && (
           <div className="border-t border-white/[0.04] pt-3">
             <span className="text-[10px] text-white/25 uppercase tracking-wider block mb-2">Quellen</span>
